@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hasTarget, logMarkdown, parsePanes, parseWindows, tailLog, tailVisible, truncateStart } from "./tmux.ts";
+import { hasTarget, logMarkdown, parsePanes, parseWindows, tailLog, truncateStart, fitLog } from "./tmux.ts";
 
 // One line as printed by `tmux list-windows -a -F LIST_FORMAT`.
 const row = (...fields: string[]) => fields.join("\t") + "\n";
@@ -53,19 +53,6 @@ test("parseWindows: a line without tab separators throws instead of yielding und
   assert.throws(() => parseWindows("proj_/p_0_@0_server_0_\n"), /unexpected tmux output/);
 });
 
-test("tailVisible: takes the newest lines that fit the height", () => {
-  assert.equal(tailVisible("1\n2\n3\n4\n5", 3, 80), "3\n4\n5");
-});
-
-test("tailVisible: wrapping lines count several times", () => {
-  // "xxxxxxxxxx" takes 3 rows at 4 columns, plus "5" = 4 > 3
-  assert.equal(tailVisible("xxxxxxxxxx\n5", 3, 4), "5");
-});
-
-test("tailVisible: shows the newest line even if it alone is too long", () => {
-  assert.equal(tailVisible("a\nxxxxxxxxxx", 2, 4), "xxxxxxxxxx");
-});
-
 test("hasTarget: finds a target at line start, with prerequisites and comment", () => {
   assert.equal(hasTarget("dev: a b\ndev-stop: ## stop Docker\n\tdocker compose stop\n", "dev-stop"), true);
 });
@@ -103,4 +90,16 @@ test("truncateStart: replaces the start with an ellipsis and fills the width", (
 test("truncateStart: no room at all gives just the ellipsis", () => {
   assert.equal(truncateStart("~/code/shop", 1), "…");
   assert.equal(truncateStart("~/code/shop", 0), "");
+});
+
+test("fitLog: keeps only the newest lines that fit the height", () => {
+  assert.equal(fitLog("1\n2\n3\n4\n5", 3, 80), "3\n4\n5");
+});
+
+test("fitLog: cuts lines longer than the width with an ellipsis", () => {
+  assert.equal(fitLog("short\nabcdefghij", 5, 6), "short\nabcde…");
+});
+
+test("fitLog: a long line still takes exactly one row", () => {
+  assert.equal(fitLog("a\nb\nxxxxxxxxxxxxxxxx", 2, 4), "b\nxxx…");
 });

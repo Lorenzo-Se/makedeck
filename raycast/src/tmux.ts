@@ -67,19 +67,15 @@ export function tailLog(raw: string, maxLines: number): string {
   return lines.slice(-maxLines).join("\n");
 }
 
-// Raycast cannot scroll the detail view; markdown always starts at the top. To keep the
-// newest output visible, take only as many trailing lines as fit (including wrapping).
-export function tailVisible(log: string, rows: number, cols: number): string {
-  const lines = log.split("\n");
-  let used = 0;
-  let start = lines.length;
-  while (start > 0) {
-    const height = Math.max(1, Math.ceil(lines[start - 1].length / cols));
-    if (used + height > rows && start < lines.length) break;
-    used += height;
-    start--;
-  }
-  return lines.slice(start).join("\n");
+// Raycast cannot scroll the detail view (markdown always starts at the top) and soft-wraps
+// long lines. To keep the newest output visible, take the last `rows` lines and cut each
+// to `cols` characters so every log line takes exactly one row.
+export function fitLog(log: string, rows: number, cols: number): string {
+  return log
+    .split("\n")
+    .slice(-rows)
+    .map((line) => (line.length <= cols ? line : line.slice(0, cols - 1) + "…"))
+    .join("\n");
 }
 
 // Raycast does not truncate section subtitles; long paths overflow onto the next row.

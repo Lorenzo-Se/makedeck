@@ -20,7 +20,7 @@ import {
   captureLog,
   listServices,
   logMarkdown,
-  tailVisible,
+  fitLog,
   truncateStart,
   openInTerminal,
   STOP_TARGET,
@@ -31,9 +31,10 @@ import {
 
 const REFRESH_MS = 2000;
 // Visible area of the detail view in the default Raycast window (estimated).
-// Too large: the newest lines fall below the edge. Too small: empty space at the bottom.
-const LOG_ROWS = 22;
-const LOG_COLS = 58;
+// LOG_ROWS too large: the newest lines fall below the edge; too small: empty space at the bottom.
+// LOG_COLS too large: long lines wrap; too small: lines are cut early.
+const LOG_ROWS = 19;
+const LOG_COLS = 60;
 // Characters that fit in a section header (project title + path) in the list column (estimated).
 const SECTION_CHARS = 40;
 
@@ -138,9 +139,7 @@ function ServiceItem({
       icon={statusIcon(service)}
       accessories={[{ text: statusText(service) }]}
       detail={
-        <List.Item.Detail
-          markdown={log === undefined ? undefined : logMarkdown(tailVisible(log, LOG_ROWS, LOG_COLS))}
-        />
+        <List.Item.Detail markdown={log === undefined ? undefined : logMarkdown(fitLog(log, LOG_ROWS, LOG_COLS))} />
       }
       actions={
         <ActionPanel>
