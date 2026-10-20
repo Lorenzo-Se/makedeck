@@ -1,9 +1,9 @@
-# devmux
+# makedeck
 
 Start all dev services of a project in the background with one keystroke, and control them from Raycast: live logs, restart, stop, and a real terminal when you need one (e.g. `r` for Flutter hot reload).
 
 ```
-Zed ⇧⌘R ──► devmux ──► tmux session "<project>" (socket "devmux")
+Zed ⇧⌘R ──► makedeck ──► tmux session "<project>" (socket "makedeck")
                          ├─ window api      make api
                          ├─ window worker   make worker
                          └─ window app      make app        ◄── ⏎ in Raycast: Terminal.app attaches
@@ -11,7 +11,7 @@ Zed ⇧⌘R ──► devmux ──► tmux session "<project>" (socket "devmux"
 Raycast "Dev Services" ─────────┘  logs · restart · stop · stop project
 ```
 
-**The idea:** your `Makefile` already knows which services a project needs. They are the prerequisites of `dev`. devmux runs each of them in its own tmux window. You get no terminal window cluttering your screen, yet every service still has a real TTY.
+**The idea:** your `Makefile` already knows which services a project needs. They are the prerequisites of `dev`. makedeck runs each of them in its own tmux window. You get no terminal window cluttering your screen, yet every service still has a real TTY.
 
 ## Requirements
 
@@ -20,23 +20,23 @@ macOS, [tmux](https://github.com/tmux/tmux), [Raycast](https://raycast.com), Nod
 ## Installation
 
 ```sh
-git clone https://github.com/Lorenzo-Se/devmux.git
-cd devmux
+git clone https://github.com/Lorenzo-Se/makedeck.git
+cd makedeck
 brew install tmux
 
-# put devmux on your PATH
-ln -s "$PWD/bin/devmux" /opt/homebrew/bin/devmux
+# put makedeck on your PATH
+ln -s "$PWD/bin/makedeck" /opt/homebrew/bin/makedeck
 
 # register the Raycast extension (once; stop it with Ctrl-C afterwards, the extension stays)
 cd raycast && npm install && npm run dev
 ```
 
-**Zed** (optional): start devmux from a task. Add this to `~/.config/zed/tasks.json`:
+**Zed** (optional): start makedeck from a task. Add this to `~/.config/zed/tasks.json`:
 
 ```jsonc
 {
-  "label": "devmux",
-  "command": "devmux",
+  "label": "makedeck",
+  "command": "makedeck",
   "cwd": "$ZED_WORKTREE_ROOT",
   "use_new_terminal": true,
   "allow_concurrent_runs": false,
@@ -45,11 +45,11 @@ cd raycast && npm install && npm run dev
 }
 ```
 
-Errors such as "already running" show up as a macOS notification. Without Zed, just run `devmux` in the project root.
+Errors such as "already running" show up as a macOS notification. Without Zed, just run `makedeck` in the project root.
 
 ## Makefile
 
-devmux reads the **first line** of the target (default `dev`, or `devmux <target>`) and starts every prerequisite **in parallel** as `make <name>`:
+makedeck reads the **first line** of the target (default `dev`, or `makedeck <target>`) and starts every prerequisite **in parallel** as `make <name>`:
 
 ```make
 .PHONY: dev api worker app backend-setup infra dev-stop
@@ -99,11 +99,11 @@ The list is grouped by project. The detail view shows the live log, refreshed ev
 
 Exited services stay visible with their exit code (`exited (0)`, `failed (2)`), so you can still read their output.
 
-> **Stop from Raycast only.** `tmux kill-session` and `respawn-window -k` do not end the processes; they keep running under PID 1 and block ports. That is why devmux signals the process groups itself.
+> **Stop from Raycast only.** `tmux kill-session` and `respawn-window -k` do not end the processes; they keep running under PID 1 and block ports. That is why makedeck signals the process groups itself.
 
 ## For coding agents
 
-The skill in [`skills/structuring-dev-makefiles`](skills/structuring-dev-makefiles/SKILL.md) teaches agents to write devmux-ready Makefiles and to fix broken ones. To use it with Claude Code:
+The skill in [`skills/structuring-dev-makefiles`](skills/structuring-dev-makefiles/SKILL.md) teaches agents to write makedeck-ready Makefiles and to fix broken ones. To use it with Claude Code:
 
 ```sh
 ln -s "$PWD/skills/structuring-dev-makefiles" ~/.claude/skills/
@@ -112,25 +112,25 @@ ln -s "$PWD/skills/structuring-dev-makefiles" ~/.claude/skills/
 ## Layout
 
 ```
-bin/devmux                    launcher (bash): reads the Makefile, creates the tmux session
+bin/makedeck                    launcher (bash): reads the Makefile, creates the tmux session
 raycast/src/tmux.ts           tmux access: list, logs, stop, restart, open in Terminal
 raycast/src/services.tsx      Raycast UI
 skills/                       agent skill for Makefiles
-tests/devmux.test.sh          integration test for bin/devmux
+tests/makedeck.test.sh          integration test for bin/makedeck
 ```
 
 ## Development
 
 ```sh
-bash tests/devmux.test.sh
+bash tests/makedeck.test.sh
 cd raycast && npm test && npm run lint && npm run build
 ```
 
-The tests start real tmux servers on their own sockets (`DEVMUX_SOCKET`) and don't touch your running sessions.
+The tests start real tmux servers on their own sockets (`MAKEDECK_SOCKET`) and don't touch your running sessions.
 
 ## Limitations
 
-- Raycast's detail view cannot scroll, so devmux shows only as many of the newest lines as fit. The size is estimated for the default Raycast window (`LOG_ROWS` and `LOG_COLS` in `services.tsx`).
+- Raycast's detail view cannot scroll, so makedeck shows only as many of the newest lines as fit. The size is estimated for the default Raycast window (`LOG_ROWS` and `LOG_COLS` in `services.tsx`).
 - Two terminal windows on the same project share the active window.
 - Processes left behind in the background by a target that has already exited can no longer be reached. Hence the "no `&`" rule.
 

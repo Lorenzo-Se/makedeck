@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hasTarget, logMarkdown, parsePanes, parseWindows, tailLog, tailVisible } from "./tmux.ts";
+import { hasTarget, logMarkdown, parsePanes, parseWindows, tailLog, tailVisible, truncateStart } from "./tmux.ts";
 
 // One line as printed by `tmux list-windows -a -F LIST_FORMAT`.
 const row = (...fields: string[]) => fields.join("\t") + "\n";
@@ -89,4 +89,18 @@ test("parsePanes: exited pane has no PID (tmux reports empty, not 0)", () => {
     { pid: null, dead: true },
     { pid: 123, dead: false },
   ]);
+});
+
+test("truncateStart: keeps text that fits", () => {
+  assert.equal(truncateStart("~/code/shop", 11), "~/code/shop");
+});
+
+test("truncateStart: replaces the start with an ellipsis and fills the width", () => {
+  assert.equal(truncateStart("~/CodingProjects/acme-shop", 12), "…s/acme-shop");
+  assert.equal(truncateStart("~/CodingProjects/acme-shop", 12).length, 12);
+});
+
+test("truncateStart: no room at all gives just the ellipsis", () => {
+  assert.equal(truncateStart("~/code/shop", 1), "…");
+  assert.equal(truncateStart("~/code/shop", 0), "");
 });

@@ -21,6 +21,7 @@ import {
   listServices,
   logMarkdown,
   tailVisible,
+  truncateStart,
   openInTerminal,
   STOP_TARGET,
   restartService,
@@ -33,6 +34,8 @@ const REFRESH_MS = 2000;
 // Too large: the newest lines fall below the edge. Too small: empty space at the bottom.
 const LOG_ROWS = 22;
 const LOG_COLS = 58;
+// Characters that fit in a section header (project title + path) in the list column (estimated).
+const SECTION_CHARS = 40;
 
 export default function Command() {
   const services = usePromise(listServices);
@@ -69,11 +72,15 @@ export default function Command() {
         <List.EmptyView
           icon={Icon.Terminal}
           title="No Dev Services Running"
-          description="Run devmux in a project root, e.g. from a Zed task"
+          description="Run makedeck in a project root, e.g. from a Zed task"
         />
       )}
       {[...projects].map(([project, items]) => (
-        <List.Section key={project} title={project} subtitle={homeRelative(items[0].projectPath)}>
+        <List.Section
+          key={project}
+          title={project}
+          subtitle={truncateStart(homeRelative(items[0].projectPath), SECTION_CHARS - project.length - 2)}
+        >
           {items.map((service) => (
             <ServiceItem
               key={service.windowId}

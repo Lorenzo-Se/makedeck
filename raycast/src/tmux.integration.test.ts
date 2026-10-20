@@ -1,4 +1,4 @@
-// Starts real projects with bin/devmux on a dedicated tmux socket.
+// Starts real projects with bin/makedeck on a dedicated tmux socket.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -6,10 +6,10 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-process.env.DEVMUX_SOCKET = `raycast-test-${process.pid}`;
+process.env.MAKEDECK_SOCKET = `raycast-test-${process.pid}`;
 const { listServices, restartService, stopProject } = await import("./tmux.ts");
 
-const DEVMUX = new URL("../../bin/devmux", import.meta.url).pathname;
+const MAKEDECK = new URL("../../bin/makedeck", import.meta.url).pathname;
 const dirs: string[] = [];
 
 const ignoreFailure = (fn: () => unknown) => {
@@ -22,7 +22,7 @@ const ignoreFailure = (fn: () => unknown) => {
 
 after(() => {
   ignoreFailure(() => execFileSync("pkill", ["-f", `KTEST${process.pid}_`]));
-  ignoreFailure(() => execFileSync("tmux", ["-L", process.env.DEVMUX_SOCKET!, "kill-server"], { stdio: "ignore" }));
+  ignoreFailure(() => execFileSync("tmux", ["-L", process.env.MAKEDECK_SOCKET!, "kill-server"], { stdio: "ignore" }));
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -43,7 +43,7 @@ function startProject(makefile: string): string {
   const dir = mkdtempSync("/tmp/raycast-test-");
   dirs.push(dir);
   writeFileSync(join(dir, "Makefile"), makefile);
-  execFileSync("bash", [DEVMUX], { cwd: dir, env: process.env, stdio: "ignore" });
+  execFileSync("bash", [MAKEDECK], { cwd: dir, env: process.env, stdio: "ignore" });
   return dir;
 }
 

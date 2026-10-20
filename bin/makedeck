@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Starts every prerequisite of a Makefile target (default: dev) as a window of a
 # background tmux session. View and control them in Raycast "Dev Services".
-# Usage, from the project root: devmux [target]
+# Usage, from the project root: makedeck [target]
 set -euo pipefail
 
 TARGET="${1:-dev}"
 # Dedicated tmux server for dev services; must match SOCKET in raycast/src/tmux.ts.
-SOCKET="${DEVMUX_SOCKET:-devmux}"
+SOCKET="${MAKEDECK_SOCKET:-makedeck}"
 
 notify() {
-  osascript -e "display notification \"$1\" with title \"devmux\"" >/dev/null 2>&1 || true
+  osascript -e "display notification \"$1\" with title \"makedeck\"" >/dev/null 2>&1 || true
 }
 fail() {
   echo "$1" >&2
@@ -39,10 +39,11 @@ if t has-session -t "=$SESSION" 2>/dev/null; then
 fi
 
 # Server options apply from the first start: exited processes stay visible as a
-# window so Raycast can show their exit code and output.
-CONF=$(mktemp /tmp/devmux-tmux.XXXXXX)
+# window so Raycast can show their exit code and output. The empty format drops
+# tmux's "Pane is dead" line from the log; Raycast shows the status anyway.
+CONF=$(mktemp /tmp/makedeck-tmux.XXXXXX)
 trap 'rm -f "$CONF"' EXIT
-printf 'set -g remain-on-exit on\nset -g history-limit 20000\n' > "$CONF"
+printf 'set -g remain-on-exit on\nset -g remain-on-exit-format ""\nset -g history-limit 20000\n' > "$CONF"
 
 # shellcheck disable=SC2086 # split PREREQS into words on purpose
 set -- $PREREQS

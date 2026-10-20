@@ -1,12 +1,18 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
-  "name": "devmux",
-  "title": "Devmux",
-  "description": "See your devmux services with live logs, open them in Terminal, restart or stop them.",
+  "name": "makedeck",
+  "title": "Makedeck",
+  "description": "See your makedeck services with live logs, open them in Terminal, restart or stop them.",
   "icon": "icon.png",
-  "author": "seml",
+  "author": "SemL",
   "license": "MIT",
   "type": "module",
+  "platforms": [
+    "macOS"
+  ],
+  "categories": [
+    "Developer Tools"
+  ],
   "commands": [
     {
       "name": "services",
@@ -32,6 +38,7 @@
     "dev": "ray develop",
     "lint": "ray lint",
     "fix-lint": "ray lint --fix",
-    "test": "node --test src/*.test.ts"
+    "test": "node --test src/*.test.ts",
+    "publish": "npx @raycast/api@latest publish"
   }
 }

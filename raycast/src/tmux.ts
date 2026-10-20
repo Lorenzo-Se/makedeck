@@ -6,9 +6,9 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-// Dedicated tmux server for dev services; must match SOCKET in bin/devmux.
-// DEVMUX_SOCKET is for tests only.
-export const SOCKET = process.env.DEVMUX_SOCKET || "devmux";
+// Dedicated tmux server for dev services; must match SOCKET in bin/makedeck.
+// MAKEDECK_SOCKET is for tests only.
+export const SOCKET = process.env.MAKEDECK_SOCKET || "makedeck";
 
 // Raycast runs extensions without Homebrew on PATH (affects tmux and e.g. docker in dev-stop).
 const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
@@ -80,6 +80,12 @@ export function tailVisible(log: string, rows: number, cols: number): string {
     start--;
   }
   return lines.slice(start).join("\n");
+}
+
+// Raycast does not truncate section subtitles; long paths overflow onto the next row.
+export function truncateStart(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return max <= 0 ? "" : "…" + text.slice(text.length - max + 1);
 }
 
 export function logMarkdown(log: string): string {
@@ -199,14 +205,28 @@ export async function openInTerminal(service: Service): Promise<void> {
   const attach =
     `${bin} -L ${SOCKET} select-window -t ${shellQuote(service.windowId)} && ` +
     `${bin} -L ${SOCKET} attach -t ${shellQuote(`=${service.project}`)}`;
-  await execFileAsync("osascript", [
-    "-e",
-    'tell application "Terminal"',
-    "-e",
-    "activate",
-    "-e",
-    `do script ${JSON.stringify(attach)}`,
-    "-e",
-    "end tell",
-  ]);
+  await execFileAsync("osascript", ["-e", OPEN_IN_TERMINAL, attach]);
 }
+
+// Terminal opens a window by itself when it launches, so reuse that one instead of
+// adding a second, empty one. Activate only afterwards: activating a running Terminal
+// that has no windows would also open an empty one.
+const OPEN_IN_TERMINAL = `
+on run argv
+  set cmd to item 1 of argv
+  set wasRunning to application "Terminal" is running
+  tell application "Terminal"
+    if not wasRunning then
+      repeat 40 times
+        if (count of windows) > 0 then exit repeat
+        delay 0.05
+      end repeat
+    end if
+    if not wasRunning and (count of windows) > 0 then
+      do script cmd in window 1
+    else
+      do script cmd
+    end if
+    activate
+  end tell
+end run`;
