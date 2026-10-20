@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Starts every prerequisite of a Makefile target (default: dev) as a window of a
+# background tmux session. View and control them in Raycast "Dev Services".
+# Usage, from the project root: devmux [target]
+set -euo pipefail
+
+TARGET="${1:-dev}"
+# Dedicated tmux server for dev services; must match SOCKET in raycast/src/tmux.ts.
+SOCKET="${DEVMUX_SOCKET:-devmux}"
+
+notify() {
+  osascript -e "display notification \"$1\" with title \"devmux\"" >/dev/null 2>&1 || true
+}
+fail() {
+  echo "$1" >&2
+  notify "$1"
+  exit 1
+}
+t() { tmux -L "$SOCKET" "$@"; }
+
+[ -f Makefile ] || fail "No Makefile in the current directory."
+command -v tmux >/dev/null 2>&1 || fail "tmux is missing. Install it with: brew install tmux"
+
+# "dev: frontend backend ## comment" -> prerequisites, without the "##" comment.
+PREREQS=$(awk -v target="$TARGET" '
+  $0 ~ "^" target "[[:space:]]*:" {
+    sub("^" target "[[:space:]]*:", "");
+    sub(/##.*/, "");
+    print;
+    exit
+  }
+' Makefile)
+[ -n "${PREREQS// }" ] || fail "Target '$TARGET' has no prerequisites in the Makefile."
+
+# Session = project folder; tmux does not allow '.' or ':' in session names.
+SESSION=$(basename "$PWD" | tr '.:' '__')
+if t has-session -t "=$SESSION" 2>/dev/null; then
+  fail "$SESSION is already running. Stop or restart it in Raycast (Dev Services)."
+fi
+
+# Server options apply from the first start: exited processes stay visible as a
+# window so Raycast can show their exit code and output.
+CONF=$(mktemp /tmp/devmux-tmux.XXXXXX)
+trap 'rm -f "$CONF"' EXIT
+printf 'set -g remain-on-exit on\nset -g history-limit 20000\n' > "$CONF"
+
+# shellcheck disable=SC2086 # split PREREQS into words on purpose
+set -- $PREREQS
+COUNT=$#
+LIST="$*"
+t -f "$CONF" new-session -d -s "$SESSION" -n "$1" -c "$PWD" -x 200 -y 50 "make $1"
+shift
+for p in "$@"; do
+  t new-window -d -t "=$SESSION:" -n "$p" -c "$PWD" "make $p"
+done
+
+echo "$SESSION: started $COUNT services ($LIST)"
+notify "$SESSION: started $COUNT services"
