@@ -25,7 +25,7 @@ cd makedeck
 brew install tmux
 
 # put makedeck on your PATH
-ln -s "$PWD/bin/makedeck" /opt/homebrew/bin/makedeck
+ln -s "$PWD/bin/makedeck" "$(brew --prefix)/bin/makedeck"
 
 # register the Raycast extension (once; stop it with Ctrl-C afterwards, the extension stays)
 cd raycast && npm install && npm run dev
@@ -126,7 +126,7 @@ bash tests/makedeck.test.sh
 cd raycast && npm test && npm run lint && npm run build
 ```
 
-The tests start real tmux servers on their own sockets (`MAKEDECK_SOCKET`) and don't touch your running sessions.
+The tests start real tmux servers on their own sockets (`MAKEDECK_SOCKET`) and don't touch your running sessions. The Raycast integration tests use `bin/makedeck` from this repository; for a copy of the extension elsewhere (e.g. in `raycast/extensions`), point `MAKEDECK_BIN` at the launcher, otherwise they are skipped.
 
 ## Limitations
 
