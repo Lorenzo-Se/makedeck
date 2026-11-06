@@ -117,16 +117,18 @@ raycast/src/tmux.ts           tmux access: list, logs, stop, restart, open in Te
 raycast/src/services.tsx      Raycast UI
 skills/                       agent skill for Makefiles
 tests/makedeck.test.sh          integration test for bin/makedeck
+tests/tmux*.test.ts           tests for raycast/src/tmux.ts (kept out of the extension)
 ```
 
 ## Development
 
 ```sh
 bash tests/makedeck.test.sh
-cd raycast && npm test && npm run lint && npm run build
+node --test tests/*.test.ts
+cd raycast && npm run lint && npm run build
 ```
 
-The tests start real tmux servers on their own sockets (`MAKEDECK_SOCKET`) and don't touch your running sessions. The Raycast integration tests use `bin/makedeck` from this repository; for a copy of the extension elsewhere (e.g. in `raycast/extensions`), point `MAKEDECK_BIN` at the launcher, otherwise they are skipped.
+The tests start real tmux servers on their own sockets (`MAKEDECK_SOCKET`) and don't touch your running sessions. The Raycast integration tests use `bin/makedeck` from this repository.
 
 ## Limitations
 

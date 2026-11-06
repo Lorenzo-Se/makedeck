@@ -7,13 +7,9 @@ import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 process.env.MAKEDECK_SOCKET = `raycast-test-${process.pid}`;
-const { listServices, restartService, stopProject, stopService } = await import("./tmux.ts");
+const { listServices, restartService, stopProject, stopService } = await import("../raycast/src/tmux.ts");
 
-// The launcher lives in the makedeck repository, not in the extension. Outside that repository
-// (e.g. in raycast/extensions), set MAKEDECK_BIN; without it these tests are skipped.
-const MAKEDECK = process.env.MAKEDECK_BIN || new URL("../../bin/makedeck", import.meta.url).pathname;
-const skip =
-  !process.env.MAKEDECK_BIN && !existsSync(MAKEDECK) && `launcher not found at ${MAKEDECK}; set MAKEDECK_BIN`;
+const MAKEDECK = new URL("../bin/makedeck", import.meta.url).pathname;
 const dirs: string[] = [];
 
 const ignoreFailure = (fn: () => unknown) => {
@@ -52,7 +48,7 @@ function startProject(makefile: string, files: Record<string, string> = {}): str
   return dir;
 }
 
-test("stopProject: ends processes including background and nohup ones, and runs dev-stop", { skip }, async () => {
+test("stopProject: ends processes including background and nohup ones, and runs dev-stop", async () => {
   const dir = startProject(
     `dev: web worker\n` +
       `web:\n\t@exec -a ${marker("web")} sleep 300\n` +
@@ -71,7 +67,7 @@ test("stopProject: ends processes including background and nohup ones, and runs 
   assert.equal((await listServices()).filter((s) => s.project === project).length, 0);
 });
 
-test("restartService: ends the old process before starting the new one", { skip }, async () => {
+test("restartService: ends the old process before starting the new one", async () => {
   const dir = startProject(`dev: api\napi:\n\t@exec -a ${marker("api")} sleep 300\n`);
   await sleep(1000);
   const project = basename(dir).replaceAll(".", "_");
@@ -85,7 +81,6 @@ test("restartService: ends the old process before starting the new one", { skip 
 
 test(
   "stopService: waits for and kills a child that ignores SIGTERM and SIGHUP after the pane exits",
-  { skip },
   async () => {
     const dir = startProject(
       `dev: api\napi:\n\t@bash -c 'trap "" TERM HUP; exec -a ${marker("stubborn")} sleep 300' & exec -a ${marker("main")} sleep 300\n`,
@@ -101,7 +96,7 @@ test(
   },
 );
 
-test("stopProject: runs dev-stop defined in an included file", { skip }, async () => {
+test("stopProject: runs dev-stop defined in an included file", async () => {
   const dir = startProject(`include stop.mk\ndev: web\nweb:\n\t@exec -a ${marker("web3")} sleep 300\n`, {
     "stop.mk": "dev-stop:\n\t@touch stopped\n",
   });
@@ -112,7 +107,7 @@ test("stopProject: runs dev-stop defined in an included file", { skip }, async (
   assert.ok(existsSync(join(dir, "stopped")), "make dev-stop did not run");
 });
 
-test("stopProject: a project without dev-stop reports that it did not run", { skip }, async () => {
+test("stopProject: a project without dev-stop reports that it did not run", async () => {
   const dir = startProject(`dev: web\nweb:\n\t@exec -a ${marker("web4")} sleep 300\n`);
   await sleep(1000);
   const project = basename(dir).replaceAll(".", "_");
@@ -120,7 +115,7 @@ test("stopProject: a project without dev-stop reports that it did not run", { sk
   assert.equal(await stopProject(project, dir), false);
 });
 
-test("stopProject: a failing sub-make in dev-stop is reported, not treated as a missing target", { skip }, async () => {
+test("stopProject: a failing sub-make in dev-stop is reported, not treated as a missing target", async () => {
   const dir = startProject(
     `dev: web\nweb:\n\t@exec -a ${marker("web5")} sleep 300\ndev-stop:\n\t@$(MAKE) -C sub dev-stop\n`,
   );
@@ -134,7 +129,7 @@ test("stopProject: a failing sub-make in dev-stop is reported, not treated as a 
 
 // Exited panes have no PID; this used to become kill(-0) on our own process group,
 // which killed Raycast (here: the test runner).
-test("stopProject: a project with an exited pane stops only that project", { skip }, async () => {
+test("stopProject: a project with an exited pane stops only that project", async () => {
   const dir = startProject(`dev: setup web\nsetup:\n\t@true\nweb:\n\t@exec -a ${marker("web2")} sleep 300\n`);
   await sleep(1000);
   const project = basename(dir).replaceAll(".", "_");
@@ -146,7 +141,7 @@ test("stopProject: a project with an exited pane stops only that project", { ski
   assert.equal(running("web2"), 0);
 });
 
-test("restartService: restarts an exited service", { skip }, async () => {
+test("restartService: restarts an exited service", async () => {
   const dir = startProject(`dev: setup\nsetup:\n\t@echo run\n`);
   await sleep(1000);
   const project = basename(dir).replaceAll(".", "_");

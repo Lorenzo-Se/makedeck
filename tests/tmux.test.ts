@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isMissingTarget, logMarkdown, parsePanes, parseWindows, tailLog, truncateStart, fitLog } from "./tmux.ts";
+import { isMissingTarget, logMarkdown, parsePanes, parseWindows, tailLog, truncateStart, fitLog } from "../raycast/src/tmux.ts";
 
 // One line as printed by `tmux list-windows -a -F LIST_FORMAT`.
 const row = (...fields: string[]) => fields.join("\t") + "\n";
