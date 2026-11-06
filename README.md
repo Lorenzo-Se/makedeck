@@ -15,7 +15,7 @@ Raycast "Dev Services" ─────────┘  logs · restart · stop �
 
 ## Requirements
 
-macOS, [tmux](https://github.com/tmux/tmux), [Raycast](https://raycast.com), Node.js ≥ 22.18 and make.
+macOS, [tmux](https://github.com/tmux/tmux), [Raycast](https://raycast.com) and make.
 
 ## Installation
 
@@ -26,10 +26,9 @@ brew install tmux
 
 # put makedeck on your PATH
 ln -s "$PWD/bin/makedeck" "$(brew --prefix)/bin/makedeck"
-
-# register the Raycast extension (once; stop it with Ctrl-C afterwards, the extension stays)
-cd raycast && npm install && npm run dev
 ```
+
+Then install the [makedeck extension from the Raycast Store](https://www.raycast.com/SemL/makedeck).
 
 **Zed** (optional): start makedeck from a task. Add this to `~/.config/zed/tasks.json`:
 
@@ -121,6 +120,8 @@ tests/tmux*.test.ts           tests for raycast/src/tmux.ts (kept out of the ext
 ```
 
 ## Development
+
+Requires Node.js ≥ 22.18.
 
 ```sh
 bash tests/makedeck.test.sh
