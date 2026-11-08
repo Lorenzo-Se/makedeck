@@ -145,6 +145,97 @@ cmd_logs() {
     tail -n "$n"
 }
 
+# Closing or respawning a window in tmux does not reliably end its processes; they keep
+# running under PID 1. Each pane process leads its own process group, so SIGTERM to the
+# group also reaches children, "&" and nohup processes. Exited panes have no PID and are
+# skipped. Anything still running after 5 s gets SIGKILL.
+# Mirrors terminate() in raycast/src/tmux.ts; keep both in sync.
+# Usage: terminate <list-panes target args>, e.g. terminate -t @3 or terminate -s -t =proj
+terminate() {
+  local pids=() pid
+  while read -r pid; do
+    # kill -- -0 would hit our own process group, kill -- -1 every process of the user.
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ]; then pids+=("$pid"); fi
+  done < <(t list-panes "$@" -F '#{pane_pid}')
+  for pid in ${pids[@]+"${pids[@]}"}; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+  wait_for_exit 50 "$@" && return 0
+  for pid in ${pids[@]+"${pids[@]}"}; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+  wait_for_exit 20 "$@" || die "Processes are still running after SIGKILL"
+}
+
+# The pane process can exit while a child that ignores SIGTERM keeps running in its
+# group, so wait for the groups themselves, not only for the panes to be dead.
+# Usage: wait_for_exit <polls of 0.1 s> <list-panes target args>; reads pids from terminate.
+wait_for_exit() {
+  local polls=$1 pid alive
+  shift
+  while :; do
+    alive=""
+    for pid in ${pids[@]+"${pids[@]}"}; do
+      if kill -0 -- "-$pid" 2>/dev/null; then alive=1; break; fi
+    done
+    if [ -z "$alive" ] && ! t list-panes "$@" -F '#{pane_dead}' | grep -qx 0; then return 0; fi
+    [ "$polls" -gt 0 ] || return 1
+    polls=$((polls - 1))
+    sleep 0.1
+  done
+}
+
+cmd_restart() {
+  [ $# -le 1 ] || die "Usage: makedeck restart [service]"
+  require_tmux die
+  local session ids id names
+  session=$(find_session)
+  if [ $# -eq 1 ]; then
+    ids=$(window_id "$session" "$1")
+    terminate -t "$ids"
+    names=$1
+  else
+    ids=$(t list-windows -t "=$session" -F '#{window_id}')
+    terminate -s -t "=$session"
+    names=$(window_names "$session")
+  fi
+  for id in $ids; do t respawn-window -k -t "$id"; done
+  echo "restarted $names"
+}
+
+# Runs make dev-stop in $1 if make knows the target (it may come from an included file).
+run_dev_stop() {
+  local out err rc=0
+  err=$(mktemp /tmp/makedeck-stop.XXXXXX)
+  # LC_ALL=C keeps make's message unlocalized, and without an inherited MAKELEVEL the
+  # top-level make reports as "make:", not "make[1]:".
+  out=$(cd "$1" && env -u MAKELEVEL LC_ALL=C make dev-stop 2>"$err") || rc=$?
+  local stderr
+  stderr=$(cat "$err")
+  rm -f "$err"
+  [ "$rc" -eq 0 ] && { echo "ran make dev-stop"; return 0; }
+  # Same rule as isMissingTarget() in raycast/src/tmux.ts: only a top-level "make:" line
+  # means the target is missing; make 3.81 quotes with `dev-stop', newer versions with 'dev-stop'.
+  if grep -Eq "^make: \*\*\* No rule to make target [\`']dev-stop'" <<<"$stderr"; then return 0; fi
+  [ -z "$out" ] || echo "$out" >&2
+  [ -z "$stderr" ] || echo "$stderr" >&2
+  exit "$rc"
+}
+
+cmd_stop() {
+  [ $# -le 1 ] || die "Usage: makedeck stop [service]"
+  require_tmux die
+  local session id path
+  session=$(find_session)
+  if [ $# -eq 1 ]; then
+    id=$(window_id "$session" "$1")
+    terminate -t "$id"
+    echo "stopped $1"
+    return 0
+  fi
+  path=$(t display-message -p -t "=$session" '#{session_path}')
+  terminate -s -t "=$session"
+  t kill-session -t "=$session"
+  echo "stopped $session"
+  run_dev_stop "$path"
+}
+
 cmd_start() {
   local target="${1:-dev}"
   [ -f Makefile ] || fail "No Makefile in the current directory."
@@ -187,6 +278,8 @@ cmd_start() {
 case "${1:-}" in
   status) shift; cmd_status "$@" ;;
   logs) shift; cmd_logs "$@" ;;
+  restart) shift; cmd_restart "$@" ;;
+  stop) shift; cmd_stop "$@" ;;
   help | -h | --help) usage ;;
   *) cmd_start "$@" ;;
 esac
