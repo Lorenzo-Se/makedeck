@@ -1,13 +1,15 @@
 // Starts real projects with bin/makedeck on a dedicated tmux socket.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 process.env.MAKEDECK_SOCKET = `raycast-test-${process.pid}`;
-const { listServices, restartService, stopProject, stopService } = await import("../raycast/src/tmux.ts");
+const { listServices, restartService, stopProject, stopService, terminateGroups } = await import(
+  "../raycast/src/tmux.ts"
+);
 
 const MAKEDECK = new URL("../bin/makedeck", import.meta.url).pathname;
 const dirs: string[] = [];
@@ -149,4 +151,41 @@ test("restartService: restarts an exited service", async () => {
   assert.equal(setup.status, "exited");
 
   await restartService(setup.windowId);
+});
+
+const groupExists = (pgid: number) => {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test("terminateGroups: ends a detached process group", async () => {
+  const child = spawn("sleep", ["300"], { detached: true, stdio: "ignore" });
+  child.unref();
+  const pgid = child.pid!;
+  assert.ok(groupExists(pgid));
+
+  try {
+    await terminateGroups([pgid]);
+    assert.equal(groupExists(pgid), false);
+  } finally {
+    if (groupExists(pgid)) process.kill(-pgid, "SIGKILL");
+  }
+});
+
+test("terminateGroups: a group that no longer exists resolves", async () => {
+  const child = spawn("true", [], { detached: true, stdio: "ignore" });
+  const pgid = child.pid!;
+  await new Promise((resolve) => child.on("exit", resolve));
+  await sleep(100);
+
+  await terminateGroups([pgid]);
+});
+
+test("terminateGroups: refuses to signal its own process group", async () => {
+  const ownGroup = Number(execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)]).toString().trim());
+  await assert.rejects(terminateGroups([ownGroup]), /refusing to signal own process group/);
 });

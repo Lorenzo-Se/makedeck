@@ -6,7 +6,7 @@ import { isMissingTarget, logMarkdown, parsePanes, parseWindows, tailLog, trunca
 const row = (...fields: string[]) => fields.join("\t") + "\n";
 
 test("parseWindows: running window", () => {
-  const out = row("proj", "/Users/x/proj", "1", "@1", "backend", "0", "");
+  const out = row("proj", "/Users/x/proj", "1", "@1", "backend", "0", "", "4242");
   assert.deepEqual(parseWindows(out), [
     {
       project: "proj",
@@ -16,18 +16,20 @@ test("parseWindows: running window", () => {
       name: "backend",
       status: "running",
       exitCode: null,
+      pid: 4242,
     },
   ]);
 });
 
 test("parseWindows: exited window with exit code", () => {
-  const [svc] = parseWindows(row("proj", "/p", "0", "@0", "migrate", "1", "2"));
+  const [svc] = parseWindows(row("proj", "/p", "0", "@0", "migrate", "1", "2", ""));
   assert.equal(svc.status, "exited");
   assert.equal(svc.exitCode, 2);
+  assert.equal(svc.pid, null);
 });
 
 test("parseWindows: window killed by a signal has no exit code", () => {
-  const [svc] = parseWindows(row("proj", "/p", "0", "@0", "server", "1", ""));
+  const [svc] = parseWindows(row("proj", "/p", "0", "@0", "server", "1", "", ""));
   assert.equal(svc.status, "exited");
   assert.equal(svc.exitCode, null);
 });
@@ -51,6 +53,10 @@ test("logMarkdown: wraps the log in a code block and defuses backtick fences", (
 test("parseWindows: a line without tab separators throws instead of yielding undefined fields", () => {
   // This is tmux output without a UTF-8 locale: tabs become "_".
   assert.throws(() => parseWindows("proj_/p_0_@0_server_0_\n"), /unexpected tmux output/);
+});
+
+test("parseWindows: a line without the pane PID field throws", () => {
+  assert.throws(() => parseWindows(row("proj", "/p", "0", "@0", "server", "0", "")), /unexpected tmux output/);
 });
 
 test("isMissingTarget: recognizes make 3.81 and make 4 quoting", () => {
