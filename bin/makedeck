@@ -1,59 +1,192 @@
 #!/usr/bin/env bash
 # Starts every prerequisite of a Makefile target (default: dev) as a window of a
-# background tmux session. View and control them in Raycast "Dev Services".
-# Usage, from the project root: makedeck [target]
+# background tmux session, and lets you (or a coding agent) inspect and control it.
+# View and control them in Raycast "Dev Services". Run `makedeck help` for usage.
 set -euo pipefail
 
-TARGET="${1:-dev}"
 # Dedicated tmux server for dev services; must match SOCKET in raycast/src/tmux.ts.
 SOCKET="${MAKEDECK_SOCKET:-makedeck}"
 
 notify() {
   osascript -e "display notification \"$1\" with title \"makedeck\"" >/dev/null 2>&1 || true
 }
+# For the start path, which usually runs from a hidden Zed task: also notify.
 fail() {
   echo "$1" >&2
   notify "$1"
   exit 1
 }
-t() { tmux -L "$SOCKET" "$@"; }
+# For the subcommands, which run in a terminal or from an agent: stderr only.
+die() {
+  echo "$1" >&2
+  exit 1
+}
+# -u: without a UTF-8 locale, tmux replaces the tab separators in -F formats with "_".
+t() { tmux -u -L "$SOCKET" "$@"; }
 
-[ -f Makefile ] || fail "No Makefile in the current directory."
-command -v tmux >/dev/null 2>&1 || fail "tmux is missing. Install it with: brew install tmux"
+usage() {
+  cat <<'EOF'
+Usage: makedeck [target]                start the prerequisites of target (default: dev)
+       makedeck status                  one line per service: running, stopped, exited (0), failed (N)
+       makedeck logs <service> [-n N]   last N lines of a service (default 100)
+       makedeck restart [service]       restart one service, or all
+       makedeck stop [service]          stop one service, or all (then runs make dev-stop)
+       makedeck hook                    Claude Code PreToolUse hook (reads JSON on stdin)
+       makedeck help                    this text
 
-# "dev: frontend backend ## comment" -> prerequisites, without the "##" comment.
-PREREQS=$(awk -v target="$TARGET" '
-  $0 ~ "^" target "[[:space:]]*:" {
-    sub("^" target "[[:space:]]*:", "");
-    sub(/##.*/, "");
-    print;
-    exit
-  }
-' Makefile)
-[ -n "${PREREQS// }" ] || fail "Target '$TARGET' has no prerequisites in the Makefile."
+status, logs, restart and stop use the session whose project folder contains the
+current directory. These names are reserved and cannot be started as targets.
+EOF
+}
 
-# Session = project folder; tmux does not allow '.' or ':' in session names.
-SESSION=$(basename "$PWD" | tr '.:' '__')
-if t has-session -t "=$SESSION" 2>/dev/null; then
-  fail "$SESSION is already running. Stop or restart it in Raycast (Dev Services)."
-fi
+require_tmux() {
+  command -v tmux >/dev/null 2>&1 || "$1" "tmux is missing. Install it with: brew install tmux"
+}
 
-# Server options apply from the first start: exited processes stay visible as a
-# window so Raycast can show their exit code and output. The empty format drops
-# tmux's "Pane is dead" line from the log; Raycast shows the status anyway.
-CONF=$(mktemp /tmp/makedeck-tmux.XXXXXX)
-trap 'rm -f "$CONF"' EXIT
-printf 'set -g remain-on-exit on\nset -g remain-on-exit-format ""\nset -g history-limit 20000\n' > "$CONF"
+# "dev: frontend backend ## comment" -> "frontend backend", without the "##" comment.
+prereqs() {
+  awk -v target="$2" '
+    $0 ~ "^" target "[[:space:]]*:" {
+      sub("^" target "[[:space:]]*:", "");
+      sub(/##.*/, "");
+      $1 = $1;
+      print;
+      exit
+    }
+  ' "$1"
+}
 
-# shellcheck disable=SC2086 # split PREREQS into words on purpose
-set -- $PREREQS
-COUNT=$#
-LIST="$*"
-t -f "$CONF" new-session -d -s "$SESSION" -n "$1" -c "$PWD" -x 200 -y 50 "make $1"
-shift
-for p in "$@"; do
-  t new-window -d -t "=$SESSION:" -n "$p" -c "$PWD" "make $p"
-done
+# Prints the session whose project folder is $PWD or its nearest parent.
+find_session() {
+  local sessions dir name path
+  if ! sessions=$(t list-sessions -F '#{session_name}	#{session_path}' 2>&1); then
+    # No server running counts as no session.
+    grep -Eq 'no server running|error connecting to' <<<"$sessions" || die "$sessions"
+    sessions=""
+  fi
+  dir=$PWD
+  while :; do
+    while IFS=$'\t' read -r name path; do
+      if [ -n "$name" ] && [ "$path" = "$dir" ]; then
+        echo "$name"
+        return 0
+      fi
+    done <<<"$sessions"
+    [ "$dir" = / ] && break
+    dir=$(dirname "$dir")
+  done
+  die "No makedeck session for $PWD. Start it with: makedeck"
+}
 
-echo "$SESSION: started $COUNT services ($LIST)"
-notify "$SESSION: started $COUNT services"
+window_names() {
+  t list-windows -t "=$1" -F '#{window_name}' | paste -sd' ' -
+}
+
+# Prints the window id (@N) of service $2 in session $1.
+window_id() {
+  local id
+  id=$(t list-windows -t "=$1" -F '#{window_id}	#{window_name}' | awk -F '\t' -v n="$2" '$2 == n { print $1; exit }')
+  [ -n "$id" ] || die "No service '$2' in $1. Services: $(window_names "$1")"
+  echo "$id"
+}
+
+# Same wording as statusText() in raycast/src/services.tsx.
+print_status() {
+  local name dead code status
+  t list-windows -t "=$1" -F '#{window_name}	#{pane_dead}	#{pane_dead_status}' |
+    while IFS=$'\t' read -r name dead code; do
+      if [ "$dead" != 1 ]; then
+        status=running
+      elif [ -z "$code" ]; then
+        status=stopped # killed by a signal
+      elif [ "$code" = 0 ]; then
+        status="exited (0)"
+      else
+        status="failed ($code)"
+      fi
+      printf '%-16s %s\n' "$name" "$status"
+    done
+}
+
+cmd_status() {
+  [ $# -eq 0 ] || die "Usage: makedeck status"
+  require_tmux die
+  local session
+  session=$(find_session)
+  print_status "$session"
+}
+
+cmd_logs() {
+  local n=100 service=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -n)
+        [ $# -ge 2 ] || die "Usage: makedeck logs <service> [-n N]"
+        n=$2
+        shift 2
+        ;;
+      *)
+        [ -z "$service" ] || die "Usage: makedeck logs <service> [-n N]"
+        service=$1
+        shift
+        ;;
+    esac
+  done
+  [ -n "$service" ] || die "Usage: makedeck logs <service> [-n N]"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] || die "-n needs a positive number, got '$n'"
+  require_tmux die
+  local session id
+  session=$(find_session)
+  id=$(window_id "$session" "$service")
+  # -J joins wrapped lines, -S -N includes N lines of history. The visible screen
+  # below the last output is blank, so drop trailing blank lines before the tail.
+  t capture-pane -p -J -S "-$n" -t "$id" |
+    awk '{ line[NR] = $0 } /[^[:space:]]/ { last = NR } END { for (i = 1; i <= last; i++) print line[i] }' |
+    tail -n "$n"
+}
+
+cmd_start() {
+  local target="${1:-dev}"
+  [ -f Makefile ] || fail "No Makefile in the current directory."
+  require_tmux fail
+
+  local list
+  list=$(prereqs Makefile "$target")
+  [ -n "$list" ] || fail "Target '$target' has no prerequisites in the Makefile."
+
+  # Session = project folder; tmux does not allow '.' or ':' in session names.
+  local session
+  session=$(basename "$PWD" | tr '.:' '__')
+  if t has-session -t "=$session" 2>/dev/null; then
+    echo "$session is already running."
+    print_status "$session"
+    notify "$session is already running."
+    exit 0
+  fi
+
+  # Server options apply from the first start: exited processes stay visible as a
+  # window so Raycast can show their exit code and output. The empty format drops
+  # tmux's "Pane is dead" line from the log; Raycast shows the status anyway.
+  CONF=$(mktemp /tmp/makedeck-tmux.XXXXXX)
+  trap 'rm -f "$CONF"' EXIT
+  printf 'set -g remain-on-exit on\nset -g remain-on-exit-format ""\nset -g history-limit 20000\n' > "$CONF"
+
+  # shellcheck disable=SC2086 # split the list into words on purpose
+  set -- $list
+  local count=$#
+  t -f "$CONF" new-session -d -s "$session" -n "$1" -c "$PWD" -x 200 -y 50 "make $1"
+  shift
+  for p in "$@"; do
+    t new-window -d -t "=$session:" -n "$p" -c "$PWD" "make $p"
+  done
+
+  echo "$session: started $count services ($list)"
+  notify "$session: started $count services"
+}
+
+case "${1:-}" in
+  status) shift; cmd_status "$@" ;;
+  logs) shift; cmd_logs "$@" ;;
+  help | -h | --help) usage ;;
+  *) cmd_start "$@" ;;
+esac

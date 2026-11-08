@@ -29,7 +29,39 @@ if grep -q "Pane is dead" <<<"$SETUP_LOG"; then
   fail "exited windows should not get tmux's 'Pane is dead' line in their log"
 fi
 
-if (cd "$PROJ" && bash "$HERE/bin/makedeck" 2>/dev/null); then
-  fail "a second start should fail while the session is running"
+MK="$HERE/bin/makedeck"
+OUT=$(cd "$PROJ" && bash "$MK") || fail "a second start should exit 0 while the session is running"
+grep -q "is already running\." <<<"$OUT" || fail "a second start should say the session is already running"
+grep -Eq "^server +running$" <<<"$OUT" || fail "a second start should print the status lines"
+
+OUT=$(cd "$PROJ" && bash "$MK" status) || fail "status should exit 0"
+grep -Eq '^setup +exited \(0\)$' <<<"$OUT" || fail "status should show setup as exited (0)"
+grep -Eq '^server +running$' <<<"$OUT" || fail "status should show server as running"
+
+mkdir "$PROJ/sub"
+OUT_SUB=$(cd "$PROJ/sub" && bash "$MK" status) || fail "status in a subdirectory should exit 0"
+[ "$OUT_SUB" = "$OUT" ] || fail "status in a subdirectory should find the session of a parent"
+
+OUT=$(cd "$PROJ" && bash "$MK" logs setup) || fail "logs should exit 0"
+grep -q "setup done" <<<"$OUT" || fail "logs setup should contain its output"
+[ "$(cd "$PROJ" && bash "$MK" logs setup -n 1)" = "setup done" ] || fail "logs setup -n 1 should print exactly the last line"
+[ "$(cd "$PROJ" && bash "$MK" logs -n 1 setup)" = "setup done" ] || fail "logs -n 1 setup should print exactly the last line"
+
+if ERR=$(cd "$PROJ" && bash "$MK" logs nope 2>&1 >/dev/null); then
+  fail "logs of an unknown service should fail"
 fi
+grep -q "Services: setup server" <<<"$ERR" || fail "an unknown service should list the services: $ERR"
+
+EMPTY=$(mktemp -d /tmp/makedeck-empty.XXXXXX)
+if ERR=$(cd "$EMPTY" && bash "$MK" status 2>&1 >/dev/null); then
+  rm -rf "$EMPTY"
+  fail "status without a session should fail"
+fi
+grep -q "No makedeck session" <<<"$ERR" || { rm -rf "$EMPTY"; fail "status without a session should say so: $ERR"; }
+if ERR=$(cd "$EMPTY" && MAKEDECK_SOCKET="makedeck-test-none-$$" bash "$MK" status 2>&1 >/dev/null); then
+  rm -rf "$EMPTY"
+  fail "status without a tmux server should fail"
+fi
+rm -rf "$EMPTY"
+grep -q "No makedeck session" <<<"$ERR" || fail "no tmux server should count as no session: $ERR"
 echo "OK"
