@@ -12,7 +12,7 @@ description: Use when creating or editing a project's Makefile `dev` target, add
 1. It reads **only the first line** `dev: a b c ## comment` as text. The **recipe of `dev` never runs.**
 2. Every prerequisite starts as `make <name>` in its own tmux window, **all at once**. Each window has its own TTY, so interactive keys such as `r` in `flutter run` work.
 3. Raycast shows each window's stdout/stderr as its log. Exited targets stay visible with their exit code.
-4. **Stop, Restart and Stop Project** send `SIGTERM` to each window's process group, then `SIGKILL` after 5 s. Stop Project then runs `make dev-stop` if that target exists.
+4. **Stop, Restart and Stop Project** in Raycast, and `makedeck stop` / `makedeck restart`, send `SIGTERM` to each window's process group, then `SIGKILL` after 5 s. Stop Project (`makedeck stop`) then runs `make dev-stop` if that target exists.
 
 ## Rules
 
@@ -79,13 +79,25 @@ dev-stop:
 - **Own PID files, `stop` targets or `trap` cleanup**: not needed, Raycast handles stopping. Only what runs outside belongs in `dev-stop`.
 - **Changing the Zed task or `makedeck` per project**: both are global. Change only the Makefile.
 - **Deleting existing targets other than `dev`/`dev-stop`** (e.g. a manual `stop`): ask first. A `down -v` must never end up in `dev-stop`.
-- **Stopping with `tmux kill-session` or running `make dev` in a terminal**: kill-session leaves the processes running under PID 1, and `make dev` works through the prerequisites one by one and hangs at the first service. Start with makedeck and stop from Raycast.
+- **Stopping with `tmux kill-session`**: it leaves the processes running under PID 1. Stop with `makedeck stop` or from Raycast.
+- **Running `make dev` or a service target yourself** (in a terminal or as an agent background job): `make dev` works through the prerequisites one by one and hangs at the first service, and a background service is invisible to Raycast and survives "Stop Project". The `makedeck hook` for Claude Code blocks this and points to `makedeck`.
+
+## For agents: running the services
+
+- Start the services with `makedeck` in the project root. Never run `make dev` or a service target yourself, in particular not in the background.
+- `makedeck` returns immediately and is safe to call when the session already runs; it then prints the status.
+- `makedeck status` shows one line per service: `running`, `stopped`, `exited (0)` or `failed (N)`.
+- `makedeck logs <service> [-n N]` prints the last N lines (default 100) of a service.
+- `makedeck restart <service>` after code changes; `makedeck restart` restarts all.
+- `makedeck stop` stops everything and runs `make dev-stop`; `makedeck stop <service>` stops one service.
+
+These commands work from any subdirectory of the project.
 
 ## Verify
 
 ```sh
-makedeck                                 # in the project root
-tmux -L makedeck list-windows -a -F '#{session_name} #{window_name} dead=#{pane_dead} exit=#{pane_dead_status}'
-tmux -L makedeck capture-pane -p -t '=<project>:<target>'   # log of one window
+makedeck                     # in the project root
+makedeck status              # every service running, setup targets exited (0)
+makedeck logs <target>       # log of one window
 ```
-Then use "Stop Project" in Raycast and check with `lsof -i :PORT` or `docker compose ps` that nothing keeps running.
+Then run `makedeck stop` (or "Stop Project" in Raycast) and check with `lsof -i :PORT` or `docker compose ps` that nothing keeps running.

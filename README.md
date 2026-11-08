@@ -44,7 +44,7 @@ Then install the [makedeck extension from the Raycast Store](https://www.raycast
 }
 ```
 
-Errors such as "already running" show up as a macOS notification. Without Zed, just run `makedeck` in the project root.
+Errors and messages such as "already running" show up as a macOS notification. Without Zed, just run `makedeck` in the project root.
 
 ## Makefile
 
@@ -83,6 +83,22 @@ The key rules:
 
 The full rules with reasons are in [`skills/structuring-dev-makefiles/SKILL.md`](skills/structuring-dev-makefiles/SKILL.md).
 
+## Commands
+
+| Command | Effect |
+|---|---|
+| `makedeck [target]` | Start every prerequisite of `target` (default `dev`). If the session already runs, print its status and exit 0 |
+| `makedeck status` | One line per service: `running`, `stopped` (killed by a signal), `exited (0)` or `failed (N)` |
+| `makedeck logs <service> [-n N]` | Last N lines (default 100) of a service |
+| `makedeck restart [service]` | Stop and start one service again, or all of them |
+| `makedeck stop [service]` | Stop one service (it stays listed as stopped), or all: close the session and run `make dev-stop` if make knows it |
+| `makedeck hook` | Claude Code `PreToolUse` hook, see [For coding agents](#for-coding-agents) |
+| `makedeck help` | Usage |
+
+`status`, `logs`, `restart` and `stop` work from any subdirectory: they use the session whose project folder contains the current directory. Stopping works like in Raycast (SIGTERM to the process groups, SIGKILL after 5 s).
+
+The command names are reserved: a Makefile target called `status`, `logs`, `restart`, `stop`, `hook` or `help` cannot be started with `makedeck <target>`.
+
 ## Raycast "Dev Services"
 
 The list is grouped by project. The detail view shows the live log, refreshed every 2 s, with the newest output at the bottom.
@@ -98,7 +114,7 @@ The list is grouped by project. The detail view shows the live log, refreshed ev
 
 Exited services stay visible with their exit code (`exited (0)`, `failed (2)`), so you can still read their output.
 
-> **Stop from Raycast only.** `tmux kill-session` and `respawn-window -k` do not end the processes; they keep running under PID 1 and block ports. That is why makedeck signals the process groups itself.
+> **Stop from Raycast or with `makedeck stop` only.** `tmux kill-session` and `respawn-window -k` do not end the processes; they keep running under PID 1 and block ports. That is why makedeck signals the process groups itself.
 
 ## For coding agents
 
@@ -108,14 +124,22 @@ The skill in [`skills/structuring-dev-makefiles`](skills/structuring-dev-makefil
 ln -s "$PWD/skills/structuring-dev-makefiles" ~/.claude/skills/
 ```
 
+Agents tend to start `make dev` or a single service in the background themselves, where neither you nor Raycast can see or stop it. The hook prevents that. Add it to `~/.claude/settings.json`:
+
+```json
+{ "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "makedeck hook" } ] } ] } }
+```
+
+In a project whose Makefile has a `dev:` target, it blocks `make dev` and, in the background, every prerequisite of `dev`, and tells the agent to use `makedeck`, `makedeck status`, `makedeck logs` and `makedeck restart` instead. It needs `jq` (`/usr/bin/jq` on macOS 15+).
+
 ## Layout
 
 ```
-bin/makedeck                    launcher (bash): reads the Makefile, creates the tmux session
+bin/makedeck                  launcher (bash): starts the tmux session; status, logs, restart, stop, hook
 raycast/src/tmux.ts           tmux access: list, logs, stop, restart, open in Terminal
 raycast/src/services.tsx      Raycast UI
 skills/                       agent skill for Makefiles
-tests/makedeck.test.sh          integration test for bin/makedeck
+tests/makedeck.test.sh        integration test for bin/makedeck
 tests/tmux*.test.ts           tests for raycast/src/tmux.ts (kept out of the extension)
 ```
 
