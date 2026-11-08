@@ -1,4 +1,12 @@
-import { basename, dirname } from "node:path";
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { open } from "node:fs/promises";
+import { homedir, userInfo } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { promisify } from "node:util";
+import { type Service, findBinary, shellQuote, tailLog, terminateGroups } from "./tmux.ts";
+
+const execFileAsync = promisify(execFile);
 
 // Dev services that run outside the makedeck tmux server, e.g. started by a coding agent
 // in the background. Detection is pure (detectExternal); scanning feeds it from ps and lsof.
@@ -30,6 +38,13 @@ export type DetectInput = {
 };
 
 const NAME_MAX = 40;
+// Raycast's PATH is minimal, so call both by absolute path.
+const PS = "/bin/ps";
+const LSOF = "/usr/sbin/lsof";
+const MAX_BUFFER = 64 * 1024 * 1024;
+// Only the end of a log file is shown; dev server logs can grow to gigabytes.
+const LOG_BYTES = 64 * 1024;
+const MOVE_TIMEOUT_MS = 30_000;
 
 // Output of `ps -x -ww -o pid=,ppid=,pgid=,args=`.
 export function parsePs(out: string): Proc[] {
@@ -247,4 +262,93 @@ export function cleanLog(raw: string): string {
       return text.slice(text.lastIndexOf("\r") + 1);
     })
     .join("\n");
+}
+
+async function lsof(args: string[]): Promise<string> {
+  try {
+    return (await execFileAsync(LSOF, args, { maxBuffer: MAX_BUFFER })).stdout;
+  } catch (error) {
+    // lsof exits 1 when it finds nothing, and also when one of several -p processes has
+    // exited in the meantime; the output for the others is still valid.
+    const { code, stdout } = error as { code?: unknown; stdout?: string };
+    if (code === 1) return stdout ?? "";
+    throw error;
+  }
+}
+
+// lsof reports resolved paths (/private/tmp), tmux and homedir() may not.
+function realPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+function readMakefile(dir: string): string | null {
+  try {
+    return readFileSync(join(dir, "Makefile"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+export async function listExternalServices(services: Service[], home = homedir()): Promise<ExternalService[]> {
+  const [ps, listening] = await Promise.all([
+    execFileAsync(PS, ["-x", "-ww", "-o", "pid=,ppid=,pgid=,args="], { maxBuffer: MAX_BUFFER }),
+    lsof(["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-u", String(userInfo().uid), "-Fpn"]),
+  ]);
+  const procs = parsePs(ps.stdout);
+  const listeners = parseListeners(listening);
+  const panePids = new Set(services.flatMap(({ pid }) => (pid === null ? [] : [pid])));
+  const candidates = candidatePids(procs, listeners, panePids);
+  const files =
+    candidates.length === 0
+      ? new Map<number, OpenFiles>()
+      : parseFiles(await lsof(["-a", "-d", "cwd,1", "-p", candidates.join(","), "-Fpftn"]));
+  return detectExternal({
+    procs,
+    listeners,
+    files,
+    panePids,
+    sessionPaths: [...new Set(services.map(({ projectPath }) => realPath(projectPath)))],
+    home: realPath(home),
+    readMakefile,
+    isRepoRoot: (dir) => existsSync(join(dir, ".git")),
+  });
+}
+
+export async function readLogFile(path: string, maxLines = 200): Promise<string> {
+  const file = await open(path, "r");
+  try {
+    const { size } = await file.stat();
+    const start = Math.max(0, size - LOG_BYTES);
+    const buffer = Buffer.alloc(size - start);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+    let text = buffer.subarray(0, bytesRead).toString("utf8");
+    // The first line is cut off (possibly inside a UTF-8 character) unless we read from 0.
+    if (start > 0) text = text.slice(text.indexOf("\n") + 1);
+    return tailLog(cleanLog(text), maxLines);
+  } finally {
+    await file.close();
+  }
+}
+
+export async function stopExternal(service: ExternalService): Promise<void> {
+  await terminateGroups([service.pgid]);
+}
+
+// Stops what runs outside makedeck for this project, then starts the project in makedeck.
+// makedeck runs through the user's login shell so that nvm, rbenv & co. are on PATH, as
+// in a terminal.
+export async function moveToMakedeck(projectPath: string, externals: ExternalService[]): Promise<void> {
+  const makedeck = findBinary("makedeck");
+  if (!makedeck) throw new Error("makedeck not found. Install it and put it on PATH.");
+  await Promise.all(externals.filter((s) => s.projectPath === projectPath).map(stopExternal));
+  const run = execFileAsync(process.env.SHELL || "/bin/zsh", ["-l", "-i", "-c", `exec ${shellQuote(makedeck)}`], {
+    cwd: projectPath,
+    timeout: MOVE_TIMEOUT_MS,
+  });
+  run.child.stdin?.end();
+  await run;
 }

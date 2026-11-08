@@ -256,7 +256,7 @@ export async function stopProject(project: string, projectPath: string): Promise
   }
 }
 
-const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+export const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 export async function openInTerminal(service: Service): Promise<void> {
   const tmuxCmd = `${shellQuote(tmuxBinary())} -L ${shellQuote(SOCKET)}`;
