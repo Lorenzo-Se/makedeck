@@ -116,6 +116,18 @@ Exited services stay visible with their exit code (`exited (0)`, `failed (2)`), 
 
 > **Stop from Raycast or with `makedeck stop` only.** `tmux kill-session` and `respawn-window -k` do not end the processes; they keep running under PID 1 and block ports. That is why makedeck signals the process groups itself.
 
+### Services outside makedeck
+
+Dev servers that someone started outside makedeck, e.g. a coding agent with `make app &`, appear in their project's section with an orange dot, the tag "outside makedeck" and their ports. Detected are `make` processes whose target is `dev` or one of its prerequisites (or that have a TCP listener below them), and TCP listeners that are not daemons, inside a Git repository below `~` or a makedeck project.
+
+| Action | Shortcut | Effect |
+|---|---|---|
+| Move to makedeck | ⏎ | stop it and start the project with `makedeck` (only if the Makefile has `dev:` and the project is not running in makedeck yet) |
+| Stop | ⌃C | SIGTERM to its process group, SIGKILL after 5 s |
+| Copy Logs | ⇧⌘C | last 200 lines, if its output goes to a file |
+
+The detail view shows the log if the process writes its output to a file; otherwise it names where the output goes. Restart and Open in Terminal are not available for these services: makedeck does not own their terminal.
+
 ## For coding agents
 
 The skill in [`skills/structuring-dev-makefiles`](skills/structuring-dev-makefiles/SKILL.md) teaches agents to write makedeck-ready Makefiles and to fix broken ones. To use it with Claude Code:
@@ -137,10 +149,12 @@ In a project whose Makefile has a `dev:` target, it blocks `make dev` and, in th
 ```
 bin/makedeck                  launcher (bash): starts the tmux session; status, logs, restart, stop, hook
 raycast/src/tmux.ts           tmux access: list, logs, stop, restart, open in Terminal
+raycast/src/processes.ts      dev services outside makedeck: scan (ps, lsof), log, stop, move
 raycast/src/services.tsx      Raycast UI
 skills/                       agent skill for Makefiles
 tests/makedeck.test.sh        integration test for bin/makedeck
 tests/tmux*.test.ts           tests for raycast/src/tmux.ts (kept out of the extension)
+tests/processes*.test.ts      tests for raycast/src/processes.ts
 ```
 
 ## Development
@@ -160,6 +174,7 @@ The tests start real tmux servers on their own sockets (`MAKEDECK_SOCKET`) and d
 - Raycast's detail view cannot scroll, so makedeck shows only as many of the newest lines as fit. The size is estimated for the default Raycast window (`LOG_ROWS` and `LOG_COLS` in `services.tsx`).
 - Two terminal windows on the same project share the active window.
 - Processes left behind in the background by a target that has already exited can no longer be reached. Hence the "no `&`" rule.
+- Services outside makedeck are found by their `make` process or their TCP port. A worker without a port that was not started via make is not detected.
 
 ## License
 
