@@ -275,11 +275,164 @@ cmd_start() {
   notify "$session: started $count services"
 }
 
+# Splits the shell command in $HOOK_CMD into segments at ; && || | & ( ) and newlines,
+# and each segment into words, honoring quotes and backslashes. Prints one segment per
+# line with the words separated by \037, and a last line "\036bg" if a lone "&" (not
+# part of &&, >& or &>) puts something in the background.
+split_command() {
+  awk '
+    function end_word() {
+      if (in_word) { seg = (nw == 0 ? word : seg "\037" word); nw++ }
+      word = ""; in_word = 0
+    }
+    function end_seg() {
+      end_word()
+      if (nw > 0) print seg
+      seg = ""; nw = 0
+    }
+    BEGIN {
+      s = ENVIRON["HOOK_CMD"]; n = length(s); q = ""; bg = 0
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "\n" && q != "") c = " "
+        if (q == "\047") {
+          if (c == "\047") q = ""; else word = word c
+          continue
+        }
+        if (q == "\"") {
+          if (c == "\\" && i < n) { i++; word = word substr(s, i, 1) }
+          else if (c == "\"") q = ""
+          else word = word c
+          continue
+        }
+        if (c == "\\" && i < n) { i++; word = word substr(s, i, 1); in_word = 1; continue }
+        if (c == "\047" || c == "\"") { q = c; in_word = 1; continue }
+        if (c == " " || c == "\t") { end_word(); continue }
+        if (c == "&") {
+          next_c = substr(s, i + 1, 1)
+          if (next_c == "&") { i++; end_seg(); continue }
+          if (next_c == ">" || (i > 1 && substr(s, i - 1, 1) == ">")) { word = word c; in_word = 1; continue }
+          bg = 1; end_seg(); continue
+        }
+        if (c == "|" || c == ";" || c == "(" || c == ")" || c == "\n") {
+          if (c == "|" && substr(s, i + 1, 1) == "|") i++
+          end_seg(); continue
+        }
+        word = word c; in_word = 1
+      }
+      end_seg()
+      if (bg) print "\036bg"
+    }
+  '
+}
+
+# Resolves directory $2 relative to $1 (logical path, like the shell).
+resolve_dir() {
+  local d=$2
+  case "$d" in
+    "~") d=$HOME ;;
+    "~/"*) d="$HOME/${d#"~/"}" ;;
+  esac
+  case "$d" in /*) ;; *) d="$1/$d" ;; esac
+  (CDPATH='' cd "$d" 2>/dev/null && pwd) || echo "$d"
+}
+
+# Claude Code PreToolUse hook: blocks Bash commands that start the dev services
+# (make dev, or a prerequisite of dev in the background) of a makedeck project.
+# Exit 0 allows, exit 2 blocks with the message on stderr.
+cmd_hook() {
+  command -v jq >/dev/null 2>&1 || die "makedeck hook needs jq"
+  local input tool cwd bg command
+  input=$(cat)
+  tool=$(jq -r '.tool_name // ""' <<<"$input")
+  [ "$tool" = Bash ] || exit 0
+  command=$(jq -r '.tool_input.command // ""' <<<"$input")
+  [[ "$command" == *make* ]] || exit 0
+  cwd=$(jq -r '.cwd // ""' <<<"$input")
+  [ -n "$cwd" ] || cwd=$PWD
+  bg=$(jq -r '.tool_input.run_in_background // false' <<<"$input")
+
+  local segments line dir=$cwd
+  segments=$(HOOK_CMD=$command split_command)
+  grep -qx $'\036bg' <<<"$segments" && bg=true
+
+  local w i n word mdir a targets list target found
+  while IFS= read -r line; do
+    [ -n "$line" ] && [ "$line" != $'\036bg' ] || continue
+    IFS=$'\037' read -r -a w <<<"$line"
+    n=${#w[@]}
+    i=0
+    # Skip VAR=value words and command prefixes.
+    while [ "$i" -lt "$n" ]; do
+      word=${w[$i]}
+      if [[ "$word" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+        i=$((i + 1))
+      elif [ "$word" = rtk ] && [ "${w[$((i + 1))]:-}" = proxy ]; then
+        i=$((i + 2))
+      else
+        case "$word" in
+          nohup | exec | command | time | env | setsid | rtk) i=$((i + 1)) ;;
+          *) break ;;
+        esac
+      fi
+    done
+    [ "$i" -lt "$n" ] || continue
+    word=${w[$i]}
+    if [ "$word" = cd ]; then
+      case "${w[$((i + 1))]:-}" in
+        "") dir=$HOME ;;
+        -) ;;
+        *) dir=$(resolve_dir "$dir" "${w[$((i + 1))]}") ;;
+      esac
+      continue
+    fi
+    case "${word##*/}" in make | gmake) ;; *) continue ;; esac
+
+    # Collect the targets of this make.
+    mdir=$dir
+    targets=()
+    i=$((i + 1))
+    while [ "$i" -lt "$n" ]; do
+      a=${w[$i]}
+      i=$((i + 1))
+      case "$a" in
+        -C) mdir=$(resolve_dir "$mdir" "${w[$i]:-.}"); i=$((i + 1)) ;;
+        -C*) mdir=$(resolve_dir "$mdir" "${a#-C}") ;;
+        -f | -I | -o | -W) i=$((i + 1)) ;;
+        -*) ;;
+        *=*) ;;
+        *)
+          if [[ "$a" =~ ^[0-9]+$ ]]; then continue; fi
+          # Redirections: "> file", "2>&1", "&> log", ">log".
+          if [[ "$a" =~ ^(&|[0-9]*)[\<\>]+[\&\|]?$ ]]; then i=$((i + 1)); continue; fi
+          if [[ "$a" =~ ^(&|[0-9]*)[\<\>] ]]; then continue; fi
+          targets+=("$a")
+          ;;
+      esac
+    done
+
+    [ -f "$mdir/Makefile" ] || continue
+    list=$(prereqs "$mdir/Makefile" dev)
+    [ -n "$list" ] || continue
+    found=""
+    for target in ${targets[@]+"${targets[@]}"}; do
+      if [ "$target" = dev ]; then found=1; fi
+      if [ "$bg" = true ] && [[ " $list " == *" $target "* ]]; then found=1; fi
+    done
+    if [ -n "$found" ]; then
+      echo "This project runs its dev services with makedeck (services: $list). Do not start them yourself. Start them with: makedeck (returns immediately, safe if already running). Check: makedeck status. Logs: makedeck logs <service>. After code changes: makedeck restart <service>." >&2
+      exit 2
+    fi
+  done <<<"$segments"
+  exit 0
+}
+
 case "${1:-}" in
   status) shift; cmd_status "$@" ;;
   logs) shift; cmd_logs "$@" ;;
   restart) shift; cmd_restart "$@" ;;
   stop) shift; cmd_stop "$@" ;;
+  hook) shift; cmd_hook "$@" ;;
   help | -h | --help) usage ;;
   *) cmd_start "$@" ;;
 esac

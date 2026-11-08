@@ -8,12 +8,13 @@ t() { tmux -L "$MAKEDECK_SOCKET" "$@"; }
 
 PROJ=$(mktemp -d /tmp/makedeck-test.XXXXXX)
 PROJ2=$(mktemp -d /tmp/makedeck-test.XXXXXX)
+HOOKS=$(mktemp -d /tmp/makedeck-hook.XXXXXX)
 # Processes of the restart/stop fixture carry this marker so pgrep finds only them.
 M="MK$$"
 cleanup() {
   pkill -f "${M}_" 2>/dev/null || true
   t kill-server 2>/dev/null || true
-  rm -rf "$PROJ" "$PROJ2"
+  rm -rf "$PROJ" "$PROJ2" "$HOOKS"
 }
 trap cleanup EXIT
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -108,4 +109,45 @@ if t has-session -t "=$SESSION2" 2>/dev/null; then fail "stop should close the s
 
 OUT=$(cd "$PROJ" && bash "$MK" stop) || fail "stop without dev-stop should exit 0"
 if grep -q "ran make dev-stop" <<<"$OUT"; then fail "stop without dev-stop should not claim it ran"; fi
+
+# --- hook ---------------------------------------------------------------------
+# H is a makedeck project, H/other has a Makefile without dev:, NOMK has no Makefile.
+H="$HOOKS/proj"
+NOMK="$HOOKS/plain"
+mkdir -p "$H/other" "$NOMK"
+printf 'dev: api worker\napi:\nworker:\ntest:\n' > "$H/Makefile"
+printf 'build:\n' > "$H/other/Makefile"
+
+# hook_case <expected-exit> <cwd> <command> [background]; leaves stderr in HOOK_ERR.
+hook_case() {
+  local want=$1 cwd=$2 cmd=$3 bg=${4:-false} rc=0
+  HOOK_ERR=$(jq -n --arg cwd "$cwd" --arg cmd "$cmd" --argjson bg "$bg" \
+    '{tool_name: "Bash", cwd: $cwd, tool_input: {command: $cmd, run_in_background: $bg}}' |
+    (cd "$NOMK" && bash "$MK" hook) 2>&1 >/dev/null) || rc=$?
+  [ "$rc" = "$want" ] || fail "hook: expected exit $want, got $rc for [$cmd] in $cwd (background: $bg): $HOOK_ERR"
+}
+
+hook_case 2 "$H" "make dev"
+grep -q "makedeck logs <service>" <<<"$HOOK_ERR" || fail "the block message should point to makedeck logs: $HOOK_ERR"
+grep -q "services: api worker" <<<"$HOOK_ERR" || fail "the block message should list the services: $HOOK_ERR"
+hook_case 2 "$H" "make -j4 dev"
+hook_case 2 "$H" "make api" true
+hook_case 2 "$H" "make api &"
+hook_case 2 "$H" "echo hi; make dev"
+hook_case 2 "$HOOKS" "cd $(basename "$H") && make dev"
+hook_case 2 "$H" "nohup make worker &"
+hook_case 2 "$H" "FOO=1 make dev"
+hook_case 2 "$H" "rtk proxy make dev"
+hook_case 2 "$NOMK" "make -C $H dev"
+
+hook_case 0 "$H" "make api"
+hook_case 0 "$H" "make test" true
+hook_case 0 "$H" "make api 2>&1"
+hook_case 0 "$H" "make api &> log"
+hook_case 0 "$H" 'git commit -m "make dev"'
+hook_case 0 "$H/other" "make dev"
+hook_case 0 "$NOMK" "make dev"
+RC=0
+jq -n --arg cwd "$H" '{tool_name: "Read", cwd: $cwd, tool_input: {file_path: "Makefile"}}' | bash "$MK" hook || RC=$?
+[ "$RC" = 0 ] || fail "hook should allow tools other than Bash, got exit $RC"
 echo "OK"
