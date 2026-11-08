@@ -147,6 +147,10 @@ hook_case 0 "$H" "make api &> log"
 hook_case 0 "$H" 'git commit -m "make dev"'
 hook_case 0 "$H/other" "make dev"
 hook_case 0 "$NOMK" "make dev"
+# Heredoc bodies are text, not commands.
+hook_case 0 "$H" $'cat >> README.md <<\'EOF\'\n## Run\n\nmake dev\nEOF'
+hook_case 0 "$H" $'cat > run.sh <<-EOF\n\tmake api &\n\tEOF'
+hook_case 2 "$H" $'cat > notes.txt << "EOF"\nhello\nEOF\nmake dev'
 RC=0
 jq -n --arg cwd "$H" '{tool_name: "Read", cwd: $cwd, tool_input: {file_path: "Makefile"}}' | bash "$MK" hook || RC=$?
 [ "$RC" = 0 ] || fail "hook should allow tools other than Bash, got exit $RC"

@@ -276,14 +276,39 @@ cmd_start() {
 }
 
 # Splits the shell command in $HOOK_CMD into segments at ; && || | & ( ) and newlines,
-# and each segment into words, honoring quotes and backslashes. Prints one segment per
-# line with the words separated by \037, and a last line "\036bg" if a lone "&" (not
-# part of &&, >& or &>) puts something in the background.
+# and each segment into words, honoring quotes and backslashes. Heredoc bodies are text,
+# not commands, and are skipped. Prints one segment per line with the words separated by
+# \037, and a last line "\036bg" if a lone "&" (not part of &&, >& or &>) puts something
+# in the background.
 split_command() {
   awk '
-    function end_word() {
-      if (in_word) { seg = (nw == 0 ? word : seg "\037" word); nw++ }
+    function add_heredoc(delim, dash) { nh++; hdelim[nh] = delim; hdash[nh] = dash }
+    function end_word(   rest, dash) {
+      if (in_word) {
+        # "<<EOF", "<<-'EOF'" or "<<" followed by the delimiter word; not "<<<".
+        if (want_delim) { add_heredoc(word, want_dash); want_delim = 0 }
+        else if (word ~ /^[0-9]*<</ && word !~ /^[0-9]*<<</) {
+          rest = word; sub(/^[0-9]*<</, "", rest)
+          dash = substr(rest, 1, 1) == "-"
+          if (dash) rest = substr(rest, 2)
+          if (rest == "") { want_delim = 1; want_dash = dash } else add_heredoc(rest, dash)
+        }
+        seg = (nw == 0 ? word : seg "\037" word); nw++
+      }
       word = ""; in_word = 0
+    }
+    # Called at the newline that ends a command line: skips the bodies of its heredocs,
+    # leaving i at the newline after the last delimiter line.
+    function skip_heredocs(   h, j, line) {
+      for (h = 1; h <= nh; h++) {
+        while (i < n) {
+          j = index(substr(s, i + 1), "\n")
+          if (j == 0) { line = substr(s, i + 1); i = n } else { line = substr(s, i + 1, j - 1); i += j }
+          if (hdash[h]) sub(/^\t+/, "", line)
+          if (line == hdelim[h]) break
+        }
+      }
+      nh = 0
     }
     function end_seg() {
       end_word()
@@ -316,7 +341,9 @@ split_command() {
         }
         if (c == "|" || c == ";" || c == "(" || c == ")" || c == "\n") {
           if (c == "|" && substr(s, i + 1, 1) == "|") i++
-          end_seg(); continue
+          end_seg()
+          if (c == "\n" && nh > 0) skip_heredocs()
+          continue
         }
         word = word c; in_word = 1
       }
