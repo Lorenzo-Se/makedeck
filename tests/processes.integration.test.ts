@@ -7,17 +7,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-// Before the import: tmux.ts reads both when it loads. bin/ of this repository comes first
-// so "Move to makedeck" starts this makedeck, on a test socket.
+const root = mkdtempSync(join(tmpdir(), "processes-test-"));
+
+// Before the import: tmux.ts reads all three when it loads. "Move to makedeck" must start
+// this repository's makedeck on a test socket, not one installed in ~/.local/bin, and its
+// login shell must not run the user's shell profile.
 process.env.MAKEDECK_SOCKET = `processes-test-${process.pid}`;
 process.env.PATH = `${new URL("../bin", import.meta.url).pathname}:${process.env.PATH}`;
+process.env.HOME = root;
 const { listExternalServices, moveToMakedeck, readLogFile, stopExternal } = await import(
   "../raycast/src/processes.ts"
 );
+const { findBinary } = await import("../raycast/src/tmux.ts");
 type Service = import("../raycast/src/tmux.ts").Service;
+const MAKEDECK = new URL("../bin/makedeck", import.meta.url).pathname;
 
 const MARK = `PTEST${process.pid}_api`;
-const root = mkdtempSync(join(tmpdir(), "processes-test-"));
 const proj = join(root, "proj");
 mkdirSync(join(proj, ".git"), { recursive: true });
 writeFileSync(
@@ -119,6 +124,7 @@ test("readLogFile: reads only the end of a large file and keeps at most maxLines
 });
 
 test("moveToMakedeck: stops the external service and starts the project in makedeck", async () => {
+  assert.equal(findBinary("makedeck"), MAKEDECK, "the test must start makedeck from this repository");
   startOutside();
   const api = await findApi();
   assert.ok(api);

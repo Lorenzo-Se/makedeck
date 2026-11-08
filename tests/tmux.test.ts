@@ -1,5 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { isMissingTarget, logMarkdown, parsePanes, parseWindows, tailLog, truncateStart, fitLog } from "../raycast/src/tmux.ts";
 
 // One line as printed by `tmux list-windows -a -F LIST_FORMAT`.
@@ -113,4 +117,29 @@ test("fitLog: cuts lines longer than the width with an ellipsis", () => {
 
 test("fitLog: a long line still takes exactly one row", () => {
   assert.equal(fitLog("a\nb\nxxxxxxxxxxxxxxxx", 2, 4), "b\nxxx…");
+});
+
+// Raycast starts extensions with a minimal PATH; "Move to makedeck" must still find a
+// makedeck installed in ~/.local/bin. SEARCH_PATH is built at import, so check in a child.
+test("findBinary: finds a binary in ~/.local/bin without it being on PATH", () => {
+  const home = mkdtempSync(join(tmpdir(), "tmux-home-"));
+  try {
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    writeFileSync(join(home, ".local", "bin", "makedeck-fake"), "", { mode: 0o755 });
+    const tmuxTs = new URL("../raycast/src/tmux.ts", import.meta.url).href;
+    const found = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const { findBinary } = await import(${JSON.stringify(tmuxTs)}); console.log(findBinary("makedeck-fake") ?? "")`,
+      ],
+      { env: { HOME: home, PATH: "/usr/bin:/bin" } },
+    )
+      .toString()
+      .trim();
+    assert.equal(found, join(home, ".local", "bin", "makedeck-fake"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

@@ -10,9 +10,10 @@ const execFileAsync = promisify(execFile);
 // MAKEDECK_SOCKET is for tests only.
 export const SOCKET = process.env.MAKEDECK_SOCKET || "makedeck";
 
-// Raycast runs extensions without Homebrew, MacPorts or Nix on PATH (affects tmux and e.g.
-// docker in dev-stop).
+// Raycast runs extensions without Homebrew, MacPorts, Nix or ~/.local/bin on PATH (affects
+// tmux, makedeck for "Move to makedeck", and e.g. docker in dev-stop).
 const EXTRA_PATH = [
+  `${homedir()}/.local/bin`,
   "/opt/homebrew/bin",
   "/usr/local/bin",
   "/opt/local/bin",
