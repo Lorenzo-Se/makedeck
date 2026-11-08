@@ -185,7 +185,11 @@ function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
     process.kill(-pgid, signal);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    // macOS reports EPERM instead of ESRCH when every process left in the group has exited
+    // but is not yet reaped (zombies, e.g. right after SIGKILL). The signal reaches no
+    // process of ours either way.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ESRCH" && code !== "EPERM") throw error;
     return false;
   }
 }

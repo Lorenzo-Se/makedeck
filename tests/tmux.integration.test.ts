@@ -189,3 +189,23 @@ test("terminateGroups: refuses to signal its own process group", async () => {
   const ownGroup = Number(execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)]).toString().trim());
   await assert.rejects(terminateGroups([ownGroup]), /refusing to signal own process group/);
 });
+
+// macOS reports EPERM, not ESRCH, for a group whose processes have all exited but are not
+// yet reaped (zombies), e.g. right after SIGKILL. That group has ended.
+test("terminateGroups: a group of zombies counts as ended", async () => {
+  const parent = spawn(
+    "/usr/bin/perl",
+    ["-e", 'my $c = fork(); if ($c == 0) { setpgrp(0, 0); exit 0 } $| = 1; print "$c\\n"; sleep 30'],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  try {
+    const pgid = Number(
+      await new Promise<string>((resolve) => parent.stdout!.once("data", (data) => resolve(String(data).trim()))),
+    );
+    await sleep(300); // the child has left its group as a zombie: the parent does not reap it
+
+    await terminateGroups([pgid]);
+  } finally {
+    parent.kill("SIGKILL");
+  }
+});
