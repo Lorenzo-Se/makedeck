@@ -151,6 +151,32 @@ hook_case 0 "$NOMK" "make dev"
 hook_case 0 "$H" $'cat >> README.md <<\'EOF\'\n## Run\n\nmake dev\nEOF'
 hook_case 0 "$H" $'cat > run.sh <<-EOF\n\tmake api &\n\tEOF'
 hook_case 2 "$H" $'cat > notes.txt << "EOF"\nhello\nEOF\nmake dev'
+# Dry runs start nothing; in "-Wn" the n is the argument of -W.
+hook_case 0 "$H" "make -n dev"
+hook_case 0 "$H" "make --dry-run dev"
+hook_case 0 "$H" "make -nB dev"
+hook_case 0 "$H" "make -q api" true
+hook_case 2 "$H" "make -Wn dev"
+# A cd inside a subshell or command substitution ends with it.
+hook_case 2 "$H" "(cd other) && make dev"
+hook_case 2 "$H" 'echo $(cd other; pwd); make dev'
+hook_case 0 "$H" "(cd other && make dev)"
+# Input the hook cannot read is allowed, not reported as a hook error.
+for INPUT in 'not json' '{"tool_name": "Bash", "tool_input": "make dev"}'; do
+  RC=0
+  printf '%s' "$INPUT" | bash "$MK" hook 2>/dev/null || RC=$?
+  [ "$RC" = 0 ] || fail "hook should allow unreadable input [$INPUT], got exit $RC"
+done
+# A command over 1 MiB with many words and a long quoted string is still checked, quickly.
+awk 'BEGIN { printf "echo"; for (i = 0; i < 150000; i++) printf " word"
+  printf "; git commit -m \""; for (i = 0; i < 50000; i++) printf "xxxxxxxxxx"; printf "\"; make dev" }' > "$HOOKS/big.txt"
+RC=0
+START=$SECONDS
+jq -n --rawfile cmd "$HOOKS/big.txt" --arg cwd "$H" '{tool_name: "Bash", cwd: $cwd, tool_input: {command: $cmd}}' |
+  bash "$MK" hook 2>/dev/null || RC=$?
+[ "$RC" = 2 ] || fail "hook should block make dev at the end of a 1.2 MB command, got exit $RC"
+# About 3 s; quadratic parsing took 30 s and more.
+[ $((SECONDS - START)) -le 15 ] || fail "hook took $((SECONDS - START)) s for a 1.2 MB command"
 RC=0
 jq -n --arg cwd "$H" '{tool_name: "Read", cwd: $cwd, tool_input: {file_path: "Makefile"}}' | bash "$MK" hook || RC=$?
 [ "$RC" = 0 ] || fail "hook should allow tools other than Bash, got exit $RC"

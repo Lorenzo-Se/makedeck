@@ -275,13 +275,18 @@ cmd_start() {
   notify "$session: started $count services"
 }
 
-# Splits the shell command in $HOOK_CMD into segments at ; && || | & ( ) and newlines,
-# and each segment into words, honoring quotes and backslashes. Heredoc bodies are text,
-# not commands, and are skipped. Prints one segment per line with the words separated by
-# \037, and a last line "\036bg" if a lone "&" (not part of &&, >& or &>) puts something
-# in the background.
+# Splits the shell command on stdin into segments at ; && || | & ( ) and newlines, and
+# each segment into words, honoring quotes and backslashes. Heredoc bodies are text, not
+# commands, and are skipped. Prints one segment per line with the words separated by \037,
+# a line "\036(" or "\036)" where a subshell starts or ends, and a last line "\036bg" if a
+# lone "&" (not part of &&, >& or &>) puts something in the background.
+# Runs in linear time: macOS awk counts UTF-8 characters from the start of the string on
+# every substr(), so the command is split into an array of bytes once. Words and heredoc
+# lines are capped at MAXWORD bytes; no command name, path, make target or heredoc delimiter
+# is longer, and growing a huge quoted string byte by byte would take quadratic time.
 split_command() {
   awk '
+    function add(c) { if (wlen < MAXWORD) { word = word c; wlen++ } in_word = 1 }
     function add_heredoc(delim, dash) { nh++; hdelim[nh] = delim; hdash[nh] = dash }
     function end_word(   rest, dash) {
       if (in_word) {
@@ -293,59 +298,64 @@ split_command() {
           if (dash) rest = substr(rest, 2)
           if (rest == "") { want_delim = 1; want_dash = dash } else add_heredoc(rest, dash)
         }
-        seg = (nw == 0 ? word : seg "\037" word); nw++
+        printf "%s%s", (nw == 0 ? "" : "\037"), word; nw++
       }
-      word = ""; in_word = 0
+      word = ""; wlen = 0; in_word = 0
     }
     # Called at the newline that ends a command line: skips the bodies of its heredocs,
     # leaving i at the newline after the last delimiter line.
-    function skip_heredocs(   h, j, line) {
+    function skip_heredocs(   h, line, len) {
       for (h = 1; h <= nh; h++) {
         while (i < n) {
-          j = index(substr(s, i + 1), "\n")
-          if (j == 0) { line = substr(s, i + 1); i = n } else { line = substr(s, i + 1, j - 1); i += j }
-          if (hdash[h]) sub(/^\t+/, "", line)
-          if (line == hdelim[h]) break
+          line = ""; len = 0; i++
+          if (hdash[h]) while (i <= n && ch[i] == "\t") i++
+          for (; i <= n && ch[i] != "\n"; i++) if (++len <= MAXWORD) line = line ch[i]
+          if (len <= MAXWORD && line == hdelim[h]) break
         }
       }
       nh = 0
     }
     function end_seg() {
       end_word()
-      if (nw > 0) print seg
-      seg = ""; nw = 0
+      if (nw > 0) printf "\n"
+      nw = 0
     }
     BEGIN {
-      s = ENVIRON["HOOK_CMD"]; n = length(s); q = ""; bg = 0
+      MAXWORD = 4096; n = 0; q = ""; bg = 0
+      while ((getline line) > 0) {
+        if (lines++) ch[++n] = "\n"
+        m = split(line, part, "")
+        for (k = 1; k <= m; k++) ch[++n] = part[k]
+      }
       for (i = 1; i <= n; i++) {
-        c = substr(s, i, 1)
+        c = ch[i]
         if (c == "\n" && q != "") c = " "
         if (q == "\047") {
-          if (c == "\047") q = ""; else word = word c
+          if (c == "\047") q = ""; else add(c)
           continue
         }
         if (q == "\"") {
-          if (c == "\\" && i < n) { i++; word = word substr(s, i, 1) }
+          if (c == "\\" && i < n) { i++; add(ch[i]) }
           else if (c == "\"") q = ""
-          else word = word c
+          else add(c)
           continue
         }
-        if (c == "\\" && i < n) { i++; word = word substr(s, i, 1); in_word = 1; continue }
+        if (c == "\\" && i < n) { i++; add(ch[i]); continue }
         if (c == "\047" || c == "\"") { q = c; in_word = 1; continue }
         if (c == " " || c == "\t") { end_word(); continue }
         if (c == "&") {
-          next_c = substr(s, i + 1, 1)
-          if (next_c == "&") { i++; end_seg(); continue }
-          if (next_c == ">" || (i > 1 && substr(s, i - 1, 1) == ">")) { word = word c; in_word = 1; continue }
+          if (ch[i + 1] == "&") { i++; end_seg(); continue }
+          if (ch[i + 1] == ">" || (i > 1 && ch[i - 1] == ">")) { add(c); continue }
           bg = 1; end_seg(); continue
         }
         if (c == "|" || c == ";" || c == "(" || c == ")" || c == "\n") {
-          if (c == "|" && substr(s, i + 1, 1) == "|") i++
+          if (c == "|" && ch[i + 1] == "|") i++
           end_seg()
+          if (c == "(" || c == ")") print "\036" c
           if (c == "\n" && nh > 0) skip_heredocs()
           continue
         }
-        word = word c; in_word = 1
+        add(c)
       }
       end_seg()
       if (bg) print "\036bg"
@@ -366,26 +376,35 @@ resolve_dir() {
 
 # Claude Code PreToolUse hook: blocks Bash commands that start the dev services
 # (make dev, or a prerequisite of dev in the background) of a makedeck project.
-# Exit 0 allows, exit 2 blocks with the message on stderr.
+# Exit 0 allows, exit 2 blocks with the message on stderr. Input that is not a Bash tool
+# call it can read is allowed.
 cmd_hook() {
   command -v jq >/dev/null 2>&1 || die "makedeck hook needs jq"
   local input tool cwd bg command
   input=$(cat)
-  tool=$(jq -r '.tool_name // ""' <<<"$input")
+  tool=$(jq -r '.tool_name // ""' <<<"$input" 2>/dev/null) || exit 0
   [ "$tool" = Bash ] || exit 0
-  command=$(jq -r '.tool_input.command // ""' <<<"$input")
+  command=$(jq -r '.tool_input.command // ""' <<<"$input" 2>/dev/null) || exit 0
   [[ "$command" == *make* ]] || exit 0
   cwd=$(jq -r '.cwd // ""' <<<"$input")
   [ -n "$cwd" ] || cwd=$PWD
   bg=$(jq -r '.tool_input.run_in_background // false' <<<"$input")
 
-  local segments line dir=$cwd
-  segments=$(HOOK_CMD=$command split_command)
+  local segments line dir=$cwd depth=0 saved=()
+  segments=$(split_command <<<"$command")
   grep -qx $'\036bg' <<<"$segments" && bg=true
 
-  local w i n word mdir a targets list target found
+  local w i n word mdir a targets list target found dry prefix
   while IFS= read -r line; do
-    [ -n "$line" ] && [ "$line" != $'\036bg' ] || continue
+    case "$line" in
+      "" | $'\036bg') continue ;;
+      # A subshell gets a copy of the directory; a cd inside it ends with it.
+      $'\036(') depth=$((depth + 1)); saved[depth]=$dir; continue ;;
+      $'\036)')
+        if [ "$depth" -gt 0 ]; then dir=${saved[depth]}; depth=$((depth - 1)); fi
+        continue
+        ;;
+    esac
     IFS=$'\037' read -r -a w <<<"$line"
     n=${#w[@]}
     i=0
@@ -418,6 +437,7 @@ cmd_hook() {
     # Collect the targets of this make.
     mdir=$dir
     targets=()
+    dry=""
     i=$((i + 1))
     while [ "$i" -lt "$n" ]; do
       a=${w[$i]}
@@ -426,7 +446,15 @@ cmd_hook() {
         -C) mdir=$(resolve_dir "$mdir" "${w[$i]:-.}"); i=$((i + 1)) ;;
         -C*) mdir=$(resolve_dir "$mdir" "${a#-C}") ;;
         -f | -I | -o | -W) i=$((i + 1)) ;;
-        -*) ;;
+        --dry-run | --just-print | --recon | --question) dry=1 ;;
+        -*)
+          # -n (dry run) and -q (question) run no recipe, also combined as in "-nB".
+          # In "-Wn" the n is the argument of -W, as for -C, -f, -I and -o.
+          if [[ "$a" =~ ^-[A-Za-z]+$ ]]; then
+            prefix=${a%%[nq]*}
+            if [ "$prefix" != "$a" ] && [[ "$prefix" != *[CfIoW]* ]]; then dry=1; fi
+          fi
+          ;;
         *=*) ;;
         *)
           if [[ "$a" =~ ^[0-9]+$ ]]; then continue; fi
@@ -438,6 +466,7 @@ cmd_hook() {
       esac
     done
 
+    [ -z "$dry" ] || continue
     [ -f "$mdir/Makefile" ] || continue
     list=$(prereqs "$mdir/Makefile" dev)
     [ -n "$list" ] || continue
