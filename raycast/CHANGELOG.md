@@ -6,7 +6,7 @@
 - Shows their log if their output goes to a file, and lets you stop them.
 - "Move to makedeck" stops them and starts the project in makedeck instead.
 
-## [Initial Version] - {PR_MERGE_DATE}
+## [Initial Version] - 2026-11-06
 
 - List makedeck services grouped by project, with live logs.
 - Open a service in Terminal, stop or restart it, restart or stop a whole project.
