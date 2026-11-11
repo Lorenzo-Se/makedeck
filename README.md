@@ -122,7 +122,7 @@ Dev servers that someone started outside makedeck, e.g. a coding agent with `mak
 
 | Action | Shortcut | Effect |
 |---|---|---|
-| Move to makedeck | ⏎ | stop it and start the project with `makedeck` (only if the Makefile has `dev:` and the project is not running in makedeck yet) |
+| Move to makedeck | ⏎ | stop it and start the project with `makedeck` (only if the Makefile's `dev:` lists services and the project is not running in makedeck yet) |
 | Stop | ⌃C | SIGTERM to its process group, SIGKILL after 5 s |
 | Copy Logs | ⇧⌘C | last 200 lines, if its output goes to a file |
 
@@ -174,7 +174,7 @@ The tests start real tmux servers on their own sockets (`MAKEDECK_SOCKET`) and d
 - Raycast's detail view cannot scroll, so makedeck shows only as many of the newest lines as fit. The size is estimated for the default Raycast window (`LOG_ROWS` and `LOG_COLS` in `services.tsx`).
 - Two terminal windows on the same project share the active window.
 - Processes left behind in the background by a target that has already exited can no longer be reached. Hence the "no `&`" rule.
-- Services outside makedeck are found by their `make` process or their TCP port. A worker without a port that was not started via make is not detected.
+- Services outside makedeck are found by their `make` process or their TCP port. A worker without a port that was not started via make is not detected. Neither is a server not started via make that was put in the background in a terminal window that has since been closed: it looks like a daemon.
 
 ## License
 

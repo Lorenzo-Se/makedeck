@@ -24,7 +24,7 @@ export type ExternalService = {
   ports: number[];
   logPath: string | null;
   stdout: string | null; // stdout name, for the "No log" message
-  makedeckReady: boolean; // projectPath has a Makefile with a dev: line
+  makedeckReady: boolean; // the Makefile in projectPath lists at least one prerequisite of dev
 };
 export type DetectInput = {
   procs: Proc[];

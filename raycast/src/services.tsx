@@ -92,7 +92,7 @@ export default function Command() {
   return (
     <List
       isLoading={data.data === undefined && data.isLoading}
-      isShowingDetail={projects.size > 0}
+      isShowingDetail={projects.size > 0 || Boolean(data.data?.scanError)}
       onSelectionChange={setSelectedId}
       searchBarPlaceholder="Search services…"
     >

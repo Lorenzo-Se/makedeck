@@ -28,7 +28,7 @@ description: Use when creating or editing a project's Makefile `dev` target, add
 | Other services wait for that service in their recipe (`until nc -z localhost PORT; do sleep 1; done`) | make has no ordering across windows |
 | Containers always run via `up -d` as setup and are stopped by `dev-stop`. To see container logs in Raycast, add a service `db-logs: infra` with `exec docker compose logs -f db` | A foreground container survives the `SIGKILL` after 5 s |
 | Whatever runs outside the process groups (Docker containers) is stopped by `dev-stop` | It is the only hook after the processes are gone |
-| `dev-stop` is non-interactive, idempotent, takes under 120 s and **deletes no data** (`stop`, not `down -v`) | Raycast runs it without a TTY. PATH holds only `/opt/homebrew/bin`, `/usr/local/bin` and system paths; nvm/asdf are missing |
+| `dev-stop` is non-interactive, idempotent, takes under 120 s and **deletes no data** (`stop`, not `down -v`) | Raycast runs it without a TTY. PATH holds only `~/.local/bin`, the Homebrew, MacPorts and Nix paths and system paths; nvm/asdf are missing |
 | Processes exit on `SIGTERM` | `SIGKILL` follows after 5 s |
 
 Target names become window names in Raycast, so keep them short: `api`, `worker`, `app`. The session name is the project folder.
