@@ -113,6 +113,29 @@ test("stopExternal: ends the service, and a second call resolves", async () => {
   await stopExternal(api);
 });
 
+// An agent's shell without job control: the server shares the group with the agent.
+test("stopExternal: in a shared process group, ends only the service", async () => {
+  const agent = spawn("bash", ["-c", "(cd proj && make api > out.log 2>&1) & sleep 300"], {
+    cwd: root,
+    detached: true,
+    stdio: "ignore",
+  });
+  agent.unref();
+  groups.push(agent.pid!);
+  try {
+    const api = await findApi();
+    assert.ok(api);
+    assert.equal(api.pgid, agent.pid);
+
+    await stopExternal(api);
+
+    assert.equal(running(), 0);
+    process.kill(agent.pid!, 0); // throws if the "agent" was stopped too
+  } finally {
+    ignoreFailure(() => process.kill(-agent.pid!, "SIGKILL"));
+  }
+});
+
 test("readLogFile: reads only the end of a large file and keeps at most maxLines", async () => {
   const path = join(root, "big.log");
   writeFileSync(path, "x".repeat(99) + "\n".repeat(1) + `${"line\n".repeat(220_000)}\x1b[32mLAST\x1b[0m\n`);

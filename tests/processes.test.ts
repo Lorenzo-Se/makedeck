@@ -12,6 +12,7 @@ import {
   parseFiles,
   parseListeners,
   parsePs,
+  stopTargets,
 } from "../raycast/src/processes.ts";
 
 test("parsePs: pid, ppid, pgid and the full command line", () => {
@@ -257,4 +258,27 @@ test("candidatePids: makes and non-daemon listeners outside makedeck panes", () 
     candidatePids(PROCS, LISTENERS, new Set([55048])).sort((a, b) => a - b),
     [6000, 6001, 6002, 7000, 7100, 7101, 8000, 8100, 8200, 8300, 8400, 8500, 51091, 51094],
   );
+});
+
+test("stopTargets: a group the service leads is signaled as a whole", () => {
+  assert.deepEqual(stopTargets(PROCS, { pid: 6000, pgid: 6000 }), { groups: [6000], pids: [6000, 6001, 6002] });
+});
+
+test("stopTargets: a group left by a dead shell, holding only the service tree, is signaled", () => {
+  assert.deepEqual(stopTargets(PROCS, { pid: 51091, pgid: 51062 }), { groups: [51062], pids: [51091, 51094] });
+});
+
+test("stopTargets: a group shared with an agent signals only the service and its children", () => {
+  const procs: Proc[] = [
+    { pid: 900, ppid: 1, pgid: 900, args: "claude" },
+    { pid: 910, ppid: 900, pgid: 900, args: "bash -c npm run dev &" },
+    { pid: 911, ppid: 910, pgid: 900, args: "node vite" },
+    { pid: 912, ppid: 911, pgid: 900, args: "esbuild --service" },
+    { pid: 920, ppid: 900, pgid: 900, args: "node other-job.js" },
+  ];
+  assert.deepEqual(stopTargets(procs, { pid: 911, pgid: 900 }), { groups: [], pids: [911, 912] });
+});
+
+test("stopTargets: a service that has exited gives nothing to signal in a shared group", () => {
+  assert.deepEqual(stopTargets(PROCS, { pid: 99999, pgid: 5999 }), { groups: [], pids: [] });
 });

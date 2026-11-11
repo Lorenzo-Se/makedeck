@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 process.env.MAKEDECK_SOCKET = `raycast-test-${process.pid}`;
-const { listServices, restartService, stopProject, stopService, terminateGroups } = await import(
+const { listServices, restartService, stopProject, stopService, terminateProcesses } = await import(
   "../raycast/src/tmux.ts"
 );
 
@@ -162,37 +162,37 @@ const groupExists = (pgid: number) => {
   }
 };
 
-test("terminateGroups: ends a detached process group", async () => {
+test("terminateProcesses: ends a detached process group", async () => {
   const child = spawn("sleep", ["300"], { detached: true, stdio: "ignore" });
   child.unref();
   const pgid = child.pid!;
   assert.ok(groupExists(pgid));
 
   try {
-    await terminateGroups([pgid]);
+    await terminateProcesses({ groups: [pgid], pids: [] });
     assert.equal(groupExists(pgid), false);
   } finally {
     if (groupExists(pgid)) process.kill(-pgid, "SIGKILL");
   }
 });
 
-test("terminateGroups: a group that no longer exists resolves", async () => {
+test("terminateProcesses: a group that no longer exists resolves", async () => {
   const child = spawn("true", [], { detached: true, stdio: "ignore" });
   const pgid = child.pid!;
   await new Promise((resolve) => child.on("exit", resolve));
   await sleep(100);
 
-  await terminateGroups([pgid]);
+  await terminateProcesses({ groups: [pgid], pids: [] });
 });
 
-test("terminateGroups: refuses to signal its own process group", async () => {
+test("terminateProcesses: refuses to signal its own process group", async () => {
   const ownGroup = Number(execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)]).toString().trim());
-  await assert.rejects(terminateGroups([ownGroup]), /refusing to signal own process group/);
+  await assert.rejects(terminateProcesses({ groups: [ownGroup], pids: [] }), /refusing to signal own process group/);
 });
 
 // macOS reports EPERM, not ESRCH, for a group whose processes have all exited but are not
 // yet reaped (zombies), e.g. right after SIGKILL. That group has ended.
-test("terminateGroups: a group of zombies counts as ended", async () => {
+test("terminateProcesses: a group of zombies counts as ended", async () => {
   const parent = spawn(
     "/usr/bin/perl",
     ["-e", 'my $c = fork(); if ($c == 0) { setpgrp(0, 0); exit 0 } $| = 1; print "$c\\n"; sleep 30'],
@@ -204,7 +204,7 @@ test("terminateGroups: a group of zombies counts as ended", async () => {
     );
     await sleep(300); // the child has left its group as a zombie: the parent does not reap it
 
-    await terminateGroups([pgid]);
+    await terminateProcesses({ groups: [pgid], pids: [] });
   } finally {
     parent.kill("SIGKILL");
   }

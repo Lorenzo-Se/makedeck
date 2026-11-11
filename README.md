@@ -124,13 +124,15 @@ Exited services stay visible with their exit code (`exited (0)`, `failed (2)`), 
 
 ### Services outside makedeck
 
-Dev servers that someone started outside makedeck, e.g. a coding agent with `make app &`, appear in their project's section with an orange dot, the tag "outside makedeck" and their ports. Detected are `make` processes whose target is `dev` or one of its prerequisites (or that have a TCP listener below them), and TCP listeners that are not daemons, inside a Git repository below `~` or a makedeck project.
+Dev servers that someone started outside makedeck, e.g. a coding agent with `make app &`, appear in their project's section with an orange dot, the label "outside makedeck" and their ports. Detected are `make` processes whose target is `dev` or one of its prerequisites (or that have a TCP listener below them), and TCP listeners that are not daemons, inside a Git repository below `~` or a makedeck project.
 
 | Action | Shortcut | Effect |
 |---|---|---|
-| Move to makedeck | ⏎ | stop it and start the project with `makedeck` (only if the Makefile's `dev:` lists services and the project is not running in makedeck yet) |
-| Stop | ⌃C | SIGTERM to its process group, SIGKILL after 5 s |
+| Move to makedeck | ⏎ | after a confirmation, stop all services of the project outside makedeck and start it with `makedeck` (only if the Makefile's `dev:` lists services and no makedeck session of that name runs yet) |
+| Copy Command | | the full command line |
+| Show Project in Finder | | |
 | Copy Logs | ⇧⌘C | last 200 lines, if its output goes to a file |
+| Stop | ⌃C | SIGTERM, SIGKILL after 5 s: to its process group if it owns it, otherwise (e.g. started by an agent's shell without job control, sharing the agent's group) to it and its child processes only |
 
 The detail view shows the log if the process writes its output to a file; otherwise it names where the output goes. Restart and Open in Terminal are not available for these services: makedeck does not own their terminal.
 
