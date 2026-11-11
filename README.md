@@ -20,6 +20,12 @@ macOS, [tmux](https://github.com/tmux/tmux), [Raycast](https://raycast.com) and 
 ## Installation
 
 ```sh
+brew install lorenzo-se/makedeck/makedeck
+```
+
+This installs `makedeck` and tmux. Or from source:
+
+```sh
 git clone https://github.com/Lorenzo-Se/makedeck.git
 cd makedeck
 brew install tmux
@@ -133,6 +139,9 @@ The detail view shows the log if the process writes its output to a file; otherw
 The skill in [`skills/structuring-dev-makefiles`](skills/structuring-dev-makefiles/SKILL.md) teaches agents to write makedeck-ready Makefiles and to fix broken ones. To use it with Claude Code:
 
 ```sh
+# installed with Homebrew
+ln -s "$(brew --prefix)/share/makedeck/skills/structuring-dev-makefiles" ~/.claude/skills/
+# from a clone of this repository
 ln -s "$PWD/skills/structuring-dev-makefiles" ~/.claude/skills/
 ```
 
